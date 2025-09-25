@@ -1,0 +1,59 @@
+---
+title: "Test R Markdown"
+author: "Rohan"
+date: "2025-09-24"
+output: html_document
+---
+
+```{r}
+animals <- c("Python", "Tarantula", "Homo Sapien", "Dog")
+num_legs <- c(0, 8, 2, 4)
+animals_df <- data.frame(animals, num_legs)
+```
+
+```{r}
+print(animals_df)
+```
+
+```{r}
+x_vect <- seq(12, 2, -2)
+print(x_vect)
+X <- matrix(x_vect, 2, 3)
+
+Y <- matrix(seq(1,4,1), 2, 2)
+print(Y)
+Z <- matrix(seq(4,10,2), 2, 2)
+print(Z)
+Yt <- t(Y)
+print(Yt)
+Zt <- t(Z)
+print(Zt)
+
+Y+Z
+Z+Y
+Y*Z
+
+Y %*% Z
+Z %*% Y
+
+Y %*% X
+
+# X %*% Y
+
+solve(Y)
+
+solve(Y) %*% Y
+
+solve(Y) %*% X
+
+solve(Y, X)
+
+```
+
+
+
+
+
+
+
+

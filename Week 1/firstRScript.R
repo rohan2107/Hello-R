@@ -1,0 +1,5 @@
+animals <- c("Tiger", "Monkey", "Zebra", "Octopus")
+num_legs <- c(4, 2, 4, 8)
+animals_df <- data.frame(animals, num_legs)
+print(animals_df)
+print(ls())

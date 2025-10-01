@@ -1,0 +1,301 @@
+---
+title: "Assignment2"
+author: "Rohan Anthony"
+date: "2025-10-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(nycflights13) # For the NYC flight data
+head(flights)
+library(gapminder) 
+```
+
+### Q1
+```{r}
+large_delays_jfk <- 
+flights %>%
+  filter(origin=="JFK" & dep_delay>=60)%>%
+  select(year, month, day, dep_delay, arr_delay, carrier)
+head(large_delays_jfk)
+```
+
+
+### Q2
+```{r}
+sprintf("Number of variables/columns: %d", ncol(large_delays_jfk))
+sprintf("Number of observations/rows: %d", nrow(large_delays_jfk))
+```
+
+### Q3
+```{r}
+large_delays_jfk %>%
+  arrange(desc(arr_delay)) %>%
+  slice(1:5) %>%
+  print()
+```
+
+### Q4
+```{r}
+airline_lookup <- data.frame(
+  carrier = c("AA", "DL", "UA", "B6", "WN"),
+  airline_name = c("American Airlines", "Delta", "United Airlines", "JetBlue", "Southwest Airlines")
+)
+
+X <- left_join(large_delays_jfk, airline_lookup, by = "carrier")
+head(X)
+```
+
+### Q5
+```{r}
+X <- X %>% rename(airline = airline_name)
+X %>%
+  select(airline, dep_delay, arr_delay)%>%
+  slice(1:7) %>%
+  print()
+```
+
+### Q6
+```{r}
+# Left join: keeps all flights, even if carrier not in look up
+left_result <- left_join(large_delays_jfk, airline_lookup, by = "carrier")
+
+# Inner join: drops flights with carriers not in look up
+inner_result <- inner_join(large_delays_jfk, airline_lookup, by = "carrier")
+
+cat("Rows with left_join():", nrow(left_result), "\n")
+cat("Rows with inner_join():", nrow(inner_result), "\n")
+
+cat("Difference (dropped rows):", nrow(left_result) - nrow(inner_result), "\n")
+
+# Example of rows that appear in left_join but not inner_join
+left_result %>%
+  filter(is.na(airline_name)) %>%
+  select(carrier, dep_delay, arr_delay) %>%
+  slice_head(n = 5)
+```
+
+### Q7
+```{r}
+X %>%
+  mutate(delay_ratio = arr_delay/dep_delay)%>%
+  select(airline, delay_ratio)%>%
+  arrange(desc(delay_ratio))%>%
+  slice(1:10)%>%
+  print()
+```
+
+### Q8
+```{r}
+X %>%
+  mutate(delay_ratio = arr_delay/dep_delay)%>%
+  group_by(airline)%>%
+  summarize(n_flights = n(), avg_dep_delay=mean(dep_delay, na.rm = TRUE), median_arr_delay=median(arr_delay, na.rm = TRUE), max_delay_ratio=max(delay_ratio, na.rm = TRUE))%>%
+  print()
+```
+
+### Q9
+```{r}
+X %>%
+  group_by(airline) %>%
+  summarize(
+    n_missing_arr_delay = sum(is.na(arr_delay)),
+    n_missing_dep_delay = sum(is.na(dep_delay))
+  )%>%
+  print()
+```
+
+### Q10
+A **random experiment** is a procedure (real or imagined) which:
+1. Has a well-defined set of possible outcomes;
+2. Could (at least in principle) be repeated arbitrarily many times
+
+An **event** is a set (i.e., a collection) of possible outcomes of interest for a random experiment
+
+A **sample space** is the set of all possible outcomes of interest for a random experiment
+
+### Q11
+An example of an *event* is that the two rolls are equal:
+$E= \{(1,1), (2,2), (3,3), (4,4), (5,5), (6,6)\}$.
+
+The *sample space* is the set of all ordered pairs of outcomes:
+$$
+S = \{(i,j): i \in \{1,2,3,4,5,6\}, \ j \in \{1,2,3,4,5,6\}\}
+$$
+which contains $|S| = 36$ outcomes.
+The total number of different events in the number of subsets of $S$, i.e. $2^{36}$
+The empty set is also considered an event with probability $0$.
+
+### Q12
+$$
+n(A \cap B) = 70  
+$$
+$$
+n(A') = 100-(70+16) = 14
+$$
+$$
+n(A \cup B) = 70+16+9 = 95
+$$
+
+### Q13
+$P(\text{ScR:high} \cap \text{ShR:high})= \frac{70}{100} = 0.7$  
+
+### Q14
+
+$P(\text{ScR:high} \cup \text{ShR:high}) = \frac{70+16+9}{100} = 0.95$  
+
+### Q15
+No these events are not mutually exclusive since a sample can have high scratch resistance and high shock resistance simultaneously.
+
+### Q16
+$P(A) = \frac{70+16}{100} = 0.86$  
+
+$P(B) = \frac{70+9}{100} = 0.79$  
+
+$P(A|B) = \frac{P(A \cap B)}{P(B)} = \frac{0.7}{0.79} 0.886$  
+
+$P(B|A) = \frac{P(A \cap B)}{P(A)} = \frac{0.7}{0.86} 0.814$  
+
+### Q17
+Two events \(A\) and \(B\) are independent if and only if
+$$
+P(A \cap B) = P(A) \times P(B).
+$$
+
+Here,
+$$
+P(A \cap B) = 0.70, \quad
+P(A) \times P(B) = 0.86 \times 0.79 = 0.6794.
+$$
+
+Since \(0.70 \neq 0.6794\), the equality does not hold, so the events are **not independent**.
+
+### Q18
+
+Let $F$ = "user is fraudulent", $L$ = "user is legitimate", and $E$ = "user originates calls from 2 or more metropolitan areas".
+
+We are given:
+- $P(F) = 0.0001$, $P(L) = 0.9999$
+- $P(E \mid F) = 0.30$
+- $P(E \mid L) = 0.01$
+
+By Bayes' theorem:
+$$
+P(F \mid E) = \frac{P(E \mid F) P(F)}{P(E \mid F) P(F) + P(E \mid L) P(L)}
+$$
+
+Substituting values:
+$$
+P(F \mid E) = \frac{0.30 \times 0.0001}{0.30 \times 0.0001 + 0.01 \times 0.9999}
+= \frac{0.00003}{0.010029} \approx 0.00299
+$$
+
+So the probability is about **0.3%**.
+
+### Q19
+
+For a zero-rule classifier (always predicts legitimate):
+
+- Sensitivity = 0  
+- Specificity = 1  
+- Accuracy = 0.9999 (99.99%)
+
+---
+
+### Q20
+
+Let $F$ = fraud, $L$ = legitimate, and Pred+ = predicted fraud.  
+We are given:
+
+- $P(F) = 0.0001$, $P(L) = 0.9999$  
+- $P(\text{Pred+} \mid F) = 0.999$ (sensitivity)  
+- $P(\text{Pred+} \mid L) = 0.01$ (false positive rate)
+
+By Bayes’ theorem:
+
+$$
+P(F \mid \text{Pred+}) =
+\frac{0.999 \times 0.0001}{0.999 \times 0.0001 + 0.01 \times 0.9999}
+= \frac{0.0000999}{0.0100989} \approx 0.00989
+$$
+
+So the probability is about **0.99%**.
+
+### Q21
+
+We want the probability that the treasure is behind gate 3, given the adventurer initially chooses gate 1 ($B_1$) and the wizard opens gate 2 to reveal a trap ($C_2$).  
+
+By Bayes’ theorem, with prior probabilities $P(A_1) = P(A_2) = P(A_3) = 1/3$, we compute:
+
+- If the treasure is behind gate 1 ($A_1$), the wizard randomly opens either gate 2 or gate 3, so  
+  $P(C_2 \mid A_1, B_1) = 1/2$.
+
+- If the treasure is behind gate 2 ($A_2$), the wizard cannot open gate 2 (it contains the treasure), so  
+  $P(C_2 \mid A_2, B_1) = 0$.
+
+- If the treasure is behind gate 3 ($A_3$), the wizard must open gate 2, so  
+  $P(C_2 \mid A_3, B_1) = 1$.
+
+Therefore
+$$
+P(A_3 \mid B_1, C_2) = 
+\frac{P(C_2 \mid A_3, B_1) \, P(A_3)}
+{P(C_2 \mid A_1, B_1) \, P(A_1) + P(C_2 \mid A_2, B_1) \, P(A_2) + P(C_2 \mid A_3, B_1) \, P(A_3)}
+$$
+
+$$
+= \frac{1 \cdot \tfrac{1}{3}}
+{\tfrac{1}{2} \cdot \tfrac{1}{3} + 0 \cdot \tfrac{1}{3} + 1 \cdot \tfrac{1}{3}}
+= \frac{\tfrac{1}{3}}{\tfrac{1}{2}}
+= \tfrac{2}{3}.
+$$
+
+Thus, given this situation, the probability that the treasure is behind gate 3 is $\tfrac{2}{3}$, suggesting that **switching is the better strategy**.
+
+---
+
+### Q22
+
+We can confirm this result by simulation. In each trial we randomly assign the treasure to one of the three gates, randomly choose an initial gate, then let the wizard open a trap door according to the rules. We then record whether the adventurer succeeds by staying or by switching.
+
+```{r monty-sim, echo=TRUE}
+set.seed(2025)
+
+n <- 200000   # number of simulated trials
+
+# Random treasure placement and initial choice
+treasure <- sample.int(3, n, replace = TRUE)
+initial  <- sample.int(3, n, replace = TRUE)
+
+wizard_open <- integer(n)
+for (i in seq_len(n)) {
+  others <- setdiff(1:3, initial[i])
+  if (treasure[i] %in% others) {
+    wizard_open[i] <- setdiff(others, treasure[i])
+  } else {
+    wizard_open[i] <- sample(others, 1)
+  }
+}
+
+# Staying: initial choice == treasure
+stay_success <- (initial == treasure)
+
+# Switching: switch to the other unopened door
+other_door <- integer(n)
+for (i in seq_len(n)) {
+  other_door[i] <- setdiff(1:3, c(initial[i], wizard_open[i]))
+}
+switch_success <- (other_door == treasure)
+
+# Estimated probabilities
+p_stay   <- mean(stay_success)
+p_switch <- mean(switch_success)
+
+cat("P(success if stay)   =", round(p_stay, 4), "\n")
+cat("P(success if switch) =", round(p_switch, 4), "\n")
+

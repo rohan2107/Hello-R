@@ -1,0 +1,478 @@
+---
+title: "Assignment 04 - Solutions"
+subtitle: "Statistical Computing and Empirical Methods"
+author: "ROHAN ANTHONY (2704500)"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## A word of advice
+Think of the SCEM labs as going to the gym: if you pay a gym membership, but instead of working out you use a machine to lift the weights for you, you won't get the benefits.
+
+ChatGPT, DeepSeek, Claude and other GenAI tools can provide answers to most of the questions below. Before you try that, please consider the following: answering the specific questions below is not the point of this assignment. Instead, the questions are designed to give you the chance to develop a better understanding of estimation concepts and a certain level of _**statistical thinking**_. These are essential skills for any data scientist, even if they end up using generative AI - to write an effective prompt and to catch the common (often subtle) errors that AI produces when trying to solve anything non-trivial.
+
+A very important part of this learning involves not having the answers ready-made for you, but instead taking the time to actually search for the answer, trying something, getting it wrong, and trying again.
+
+So, make the best use of this session. The assignments are not marked, so it is much better to try the yourself even if you get incorrect answers (you'll be able to correct yourself later when you receive feedback) than to submit a perfect, but GPT'd solution.
+
+-----
+
+## IMPORTANT NOTES: 
+- **DO NOT** change the code block names. Enter your solutions to each question into the predefined code blocks. 
+- **DO NOT** add calls to `install.packages()` into your solutions. Some questions may require you to load packages using `library()`. Please do not use any other packages except the ones explicitly listed in the "setup" code block. 
+
+---
+
+## Setup
+
+This code block below sets up your session. The only think you should change in it is to replace `"ABCDEFG"` by your student ID number, which will be used as the seed for your random number generators.
+
+```{r ID, echo=FALSE, message=FALSE, warning=FALSE}
+## We will use your student ID as the seed for the random number generator.
+MY_STUDENT_ID <- 2704500 # <-- Replace "ABCDEFG" by your student ID number (as an integer, i.e., without quotes).
+```
+
+```{r Setup, echo=FALSE, message=FALSE, warning=FALSE}
+## DO NOT CHANGE ANYTHING IN THIS CODE BLOCK
+
+## Note: tidyverse includes:
+## ggplot2, dplyr, tidyr, readr, purrr, tibble, stringr, forcats, and lubridate.
+## Check https://www.tidyverse.org/packages/ for details
+
+allowed.packages <- c("tidyverse", "readxl")
+
+for (i in seq_along(allowed.packages)){
+  if(!(allowed.packages[i] %in% installed.packages()[, 1])){
+    install.packages(allowed.packages[i])
+  }
+  library(allowed.packages[i], character.only = TRUE)
+}
+
+knitr::opts_chunk$set(echo = TRUE, collapse=TRUE)
+ignore <- runif(1) # To initialise the PRNG
+```
+```{r checkID, echo=FALSE}
+if(!is.numeric(MY_STUDENT_ID)){
+  stop("MY_STUDENT_ID MUST BE YOUR VALID NUMERIC ID.")
+} 
+```
+
+## Part I: Tidy data and iteration
+
+### Q1: Missing data and iteration
+
+:::{#prompt .message style="color: blue;"}
+**a.** Define the function called `impute_by_median` and test it using the test vector `xtest`. 
+:::
+
+```{r Q1a}
+## Question 1.a
+xtest <- c(1, 2, 3, 4, NA, 6, NA, 8, 9, 10)
+
+# impute_by_median <- function...
+impute_by_median <- function(x) {
+  x_median <- median(x, na.rm = TRUE)
+  impute <- function(z) {
+    if (is.na(z)) {
+      return(x_median)
+    } else {
+      return(z)
+    }
+  }
+  return(map_dbl(x, impute))
+}
+
+x <- impute_by_median(xtest)
+xtest
+x
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Build your data frame following the instructions in the assignment specs and store it as a data frame called `df_xy`. 
+:::
+
+```{r Q1b}
+## Question 1.b
+
+# df_xy <- ...
+x <- seq(0, 10, 0.1)
+y <- 5*x+1
+df_xy <- data.frame(x=x, y=y)
+head(df_xy)
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Define function `sometimes_missing()` and produce the dataset `df_xy_missing` following the instructions from the assignment specs.
+:::
+
+```{r}
+## TWO EXAMPLES OF USING map2
+library(dplyr)
+library(purrr)
+
+# Trivial example:
+df_xy %>% 
+  mutate(z = map2_dbl(x, y, .f = ~.x + .y)) %>%
+  head(n=5) 
+
+
+# A bit more complex:
+# Student grades (%) per assessment of three different units
+grades <- list(
+  c(90, 85, 88),
+  c(70, 80, 75, 85),
+  c(100, 95)
+)
+
+# Assessment weights per unit
+weights <- list(
+  c(0.3, 0.3, 0.4),
+  c(0.25, 0.25, 0.25, 0.25),
+  c(0.6, 0.4)
+)
+
+# Weighted mean for each unit
+map2_dbl(grades, weights, ~ sum(.x * .y))
+```
+
+```{r Q1c}
+## Question 1.c
+
+## sometimes_missing <- function...
+sometimes_missing <- function(index, value) {
+  if (index%%5==0) {
+    return(NA)
+  } else {
+    return(value)
+  }
+}
+sometimes_missing(12, 3)
+sometimes_missing(15, 3)
+
+## df_xy_missing <- ...
+df_xy_missing <- df_xy %>%
+  mutate(index = row_number(), y_val = 5*x+1,
+         y=map2_dbl(index, y_val, sometimes_missing)) %>%
+  select(x,y)
+df_xy_missing %>% head(10)
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Build your data frame following the instructions in the assignment specs and store it as a data frame called `df_xy_imputed`. 
+:::
+
+```{r Q1d}
+## Question 1.d
+
+# df_xy_imputed <- ...
+df_xy_imputed <- df_xy_missing %>%
+  mutate(y=impute_by_median(y))
+df_xy_imputed %>% head(10)
+```
+
+*****
+
+### Q2: 
+
+:::{#prompt .message style="color: blue;"}
+**a.** Follow the instructions from the assignment template to load the data from `HockeyLeague.xlsx` and produce a tidy data frame called `wins_tidy`. 
+:::
+
+```{r Q2a}
+## Question 2.a
+folder_path <- "C:/Users/rohta/OneDrive/Desktop/MSc Data Science/SCEM - Statistical Computing and Empirical Methods/Labs/Hello-R/Week 4"
+file_path <- paste0(folder_path, "/HockeyLeague.xlsx")
+wins_data_frame <- read_excel(file_path, sheet = "Wins")
+
+# wins_tidy <- ...
+wins_tidy <- wins_data_frame %>%
+  rename(Team = ...1) %>%
+  pivot_longer(
+    cols = -Team,
+    names_to = "Year",
+    values_to = "Result"
+  ) %>%
+  separate(
+    col = Result,
+    into = c("Wins", "Total"),
+    sep = " of "
+  ) %>%
+  mutate(
+    Year = as.integer(Year),
+    Wins = as.integer(Wins),
+    Total = as.integer(Total)
+  )
+wins_tidy %>% head(5)
+  
+
+# Check the dimension of your resulting dataframe:
+dim(wins_tidy)
+
+# Check the column classes:
+sapply(wins_tidy, class) ## equivalent to map_chr(wins_tidy, class)
+
+# Check the top 4 rows:
+wins_tidy %>% print(n = 4)
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Follow the instructions from the assignment template to produce a tidy data frame called `losses_tidy`. 
+:::
+
+```{r Q2b}
+## Question 2.b
+losses_data_frame <- read_excel(file_path, sheet = "Losses")
+
+
+# losses_tidy <- ...
+losses_tidy <- losses_data_frame %>%
+  rename(Team = ...1) %>%
+  pivot_longer(
+    cols = -Team,
+    names_to = "Year",
+    values_to = "Result"
+  ) %>%
+  separate(
+    col = Result,
+    into = c("Losses", "Total"),
+    sep = " of "
+  ) %>%
+  mutate(
+    Year = as.integer(Year),
+    Losses = as.integer(Losses),
+    Total = as.integer(Total)
+  )
+losses_tidy %>% head(10)
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Follow the instructions from the assignment template to produce a the data frame called `hockey_df`. 
+:::
+
+```{r Q2c}
+## Question 2.c
+
+
+
+# hockey_df <- ...
+hockey_df <- wins_tidy %>%
+  inner_join(losses_tidy, by = c("Team", "Year"), suffix = c("_wins", "_losses")) %>%
+  rename(Total = Total_wins) %>%
+  mutate(
+    Draws = Total - (Wins + Losses),
+    Wins_rt = Wins/Total,
+    Losses_rt = Losses/Total,
+    Draws_rt = Draws/Total
+  ) %>%
+  select(Team, Year, Wins, Losses, Draws, Total, Wins_rt, Losses_rt, Draws_rt)
+dim(hockey_df)
+hockey_df %>% head(5)
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Follow the instructions from the assignment template to produce a the data frame called `summary_teams`. 
+:::
+
+```{r Q2d}
+## Question 2.d
+
+
+# summary_teams <- ...
+summary_teams <- hockey_df %>%
+  group_by(Team) %>%
+  summarise(
+    median_win_rate = median(Wins_rt, na.rm = TRUE),
+    mean_win_rate = mean(Wins_rt, na.rm  =TRUE),
+    median_loss_rate = median(Losses_rt, na.rm = TRUE),
+    mean_loss_rate = mean(Losses_rt, na.rm = TRUE),
+  )%>%
+  arrange(desc(median_win_rate))
+
+nrow(summary_teams)
+summary_teams
+  
+```
+
+*****
+
+## Part II: Confidence intervals
+
+### Q3: CIs for the Mean and Variance of a normal variable
+
+:::{#prompt .message style="color: blue;"}
+**a.** Define the function called `ci_mean_known_var` as described in the assignment specs. Test it in the vector `xtest2` defined below, using the known variance defined as `known_var`.
+:::
+
+```{r Q3a}
+## Question 3.a
+set.seed(MY_STUDENT_ID)                               ## <-- don't change this
+known_var <- runif(1, min = 1, max = 3)               ## <-- don't change this
+xtest2 <- rnorm(10, mean = 5, sd = sqrt(known_var))   ## <-- don't change this
+
+## Your code starts below this line
+
+# ci_mean_known_var <- function...
+ci_mean_known_var <- function(x, var, conf.level) {
+  n <- length(x)
+  alpha <- 1-conf.level
+  z <- qnorm(1-alpha/2)
+  xbar <- mean(x)
+  se <- sqrt(var/n)
+  lower <- xbar-z*se
+  upper <- xbar+z*se
+  return(c(lower=lower,upper=upper))
+}
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Define the function called `ci_variance` as described in the assignment specs. Test it in the same vector `xtest2` defined above.
+:::
+
+```{r Q3b}
+## Question 3.b
+
+
+# ci_variance <- function...
+ci_variance <- function(x, conf.level) {
+  n <- length(x)
+  s2 <- var(x)
+  alpha <- 1 - conf.level
+  lower_chi <- qchisq(1-alpha/2, df = n-1)
+  upper_chi <- qchisq(alpha/2, df=n-1)
+  lower <- (n-1)*s2/lower_chi
+  upper <- (n-1)*s2/upper_chi
+  return(c(lower=lower,upper=upper))
+}
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Define the function called `ci_mean_t` as described in the assignment specs. Test it in the same vector `xtest2` defined above, and contrast the interval half-widths from both cases. Can you explain why they're different?
+:::
+
+```{r Q3c}
+## Question 3.c
+
+
+# ci_mean_t <- function...
+ci_mean_t <- function(x, conf.level) {
+  n<- length(x)
+  alpha <- 1-conf.level
+  tq <- qt(1-alpha/2, df=n-1)
+  xbar <- mean(x)
+  se <- sd(x)/sqrt(n)
+  lower <-xbar-tq*se
+  upper <-xbar+tq*se
+  return(c(lower=lower,upper=upper))
+}
+
+# an interval half-length can be calculated from a vector 'x' containing a CI using 
+# diff(x) / 2.
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Build the required data frame and plot the observed differences in the half-widths of CIs obtained using your functions, as explained in the assignment specs.
+:::
+
+```{r Q3d}
+## Question 3.d
+set.seed(MY_STUDENT_ID) ## <-- don't change this
+
+Ns <- 2:30
+results <- map_df(Ns,function(N) {
+  x <- rnorm(N, mean=0, sd=1)
+  ci_z <- ci_mean_known_var(x, 1, 0.95)
+  ci_t <- ci_mean_t(x, 0.95)
+  tibble(N=N,
+         CI.hw.norm = (ci_z["upper"]-ci_z["lower"])/2,
+         CI.hw.t = (ci_t["upper"]-ci_t["lower"])/2
+         )
+})
+print(results)
+plot_df <- results %>%
+  pivot_longer(cols = c(CI.hw.norm, CI.hw.t), names_to="method", values_to="halfwidth")
+
+ggplot(plot_df, aes(x = N, y=halfwidth, color=method)) +
+  geom_line()+
+  geom_point(size=1.5) +
+  scale_x_continuous(breaks = Ns)+
+  labs(x="N", y="CI half-width", color = "Method")+
+  theme_minimal()
+
+
+```
+
+*****
+
+## Q4: bootstrap confidence intervals
+
+:::{#prompt .message style="color: blue;"}
+**a.** Build the function `median_boot_ci` as indicated in the CW specs
+:::
+
+```{r Q4a}
+## Question 4.a
+median_boot_ci <- function(x, R, conf) {
+  boot_meds <- replicate(R, median(sample(x, size=length(x), replace=TRUE)))
+  alpha <- 1-conf
+  probs <- c(alpha/2, 1-alpha/2)
+  q<- quantile(boot_meds, probs=probs, na.rm=TRUE)
+  return(c(lower = unname(q[1]), upper=unname(q[2])))
+}
+
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Calculate the confidence interval as indicated in the assignment specs.
+:::
+
+```{r Q4b}
+## Question 4.b
+file_path <-paste0(folder_path, "/pharma_drug_spending.csv")
+oecd.pharma<- read_csv(file_path)
+usd_2022 <- oecd.pharma %>%
+  filter(TIME==2002)%>%
+  pull(USD_CAP)
+# med_usd_cap_ci <- ...
+med_usd_cap_ci <- median_boot_ci(usd_2022, 2000, 0.95)
+med_usd_cap_ci
+```
+
+
+:::{#prompt .message style="color: blue;"}
+**c.** Calculate the mean and $95\%$ CI on the median %GDP spent per year on pharmaceutical drugs in OECD countries, and generate the plot as indicated in the assignment specs. 
+:::
+
+```{r Q4c}
+## Question 4.c
+years_range <- 1980:2020
+median_by_year <- oecd.pharma %>%
+  filter(TIME >= min(years_range) & TIME<= max(years_range)) %>%
+  group_by(TIME) %>%
+  summarise(
+    median_pc_gdp = median(PC_GDP, na.rm = TRUE),
+    ci = list(median_boot_ci(PC_GDP, 2000, 0.95)),
+    .groups = "drop"
+  ) %>%
+  unnest_wider(ci, names_sep = ".") %>%
+  rename(Year = TIME, CI_lower = ci.lower, CI_upper = ci.upper)
+head(median_by_year)
+
+ggplot(median_by_year, aes(x = Year, y = median_pc_gdp))+
+  geom_point(size=2)+
+  geom_errorbar(aes(ymin = CI_lower, ymax = CI_upper), width = 0.4)+
+  labs(
+    title = "Median proportion of GDP spent on pharmaceutical dr",
+    x = "Year",
+    y = "%GDP"
+  )+
+  theme_minimal()
+
+```

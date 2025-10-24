@@ -1,0 +1,367 @@
+---
+title: "Assignment 03 - Solutions"
+subtitle: "Statistical Computing and Empirical Methods"
+author: "YOUR_NAME (YOUR_STUDENT_ID)"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## A word of advice
+Think of the SCEM labs as going to the gym: if you pay a gym membership, but instead of working out you use a machine to lift the weights for you, you won't get the benefits.
+
+ChatGPT, DeepSeek, Claude and other GenAI tools can provide answers to most of the questions below. Before you try that, please consider the following: answering the specific questions below is not the point of this assignment. Instead, the questions are designed to give you the chance to develop a better understanding of estimation concepts and a certain level of _**statistical thinking**_. These are essential skills for any data scientist, even if they end up using generative AI - to write an effective prompt and to catch the common (often subtle) errors that AI produces when trying to solve anything non-trivial.
+
+A very important part of this learning involves not having the answers ready-made for you, but instead taking the time to actually search for the answer, trying something, getting it wrong, and trying again.
+
+So, make the best use of this session. The assignments are not marked, so it is much better to try the yourself even if you get incorrect answers (you'll be able to correct yourself later when you receive feedback) than to submit a perfect, but GPT'd solution.
+
+-----
+
+## IMPORTANT NOTES: 
+- **DO NOT** change the code block names. Enter your solutions to each question into the predefined code blocks. 
+- **DO NOT** add calls to `install.packages()` into your solutions. Some questions may require you to load packages using `library()`. Please do not use any other packages except the ones explicitly listed in the "setup" code block below. 
+
+---
+
+## Setup
+
+This code block below sets up your session. The only think you should change in it is to replace `ABCDEF` by your student ID number, which will be used as the seed for your random number generators.
+
+```{r setup, echo=FALSE}
+## We will use your student ID as the seed for the random number generator.
+MY_STUDENT_ID <- 1234567 # <-- Replace ABCDEF by your student ID number  
+
+
+## These are the packages you can use (if needed) for the present assignment.
+## If needed, you can run install.packages(tidyverse) in your machine, but 
+## **do not** include any calls to install.packages() as part of your solution.
+
+permitted.packages <- c("ggplot2", "dplyr", "tidyverse", "nycflights13") # <--- Don't change this
+
+knitr::opts_chunk$set(echo = TRUE) # <---- Don't change this
+```
+
+## Part I: Point estimation of parameters
+
+### Q1. Simulating data and estimating the mean
+
+```{r Q1a}
+#' variables required: xunif, x.mean, x.var
+#' plots required: NA
+
+## Question 1.a
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+xunif <- runif(12, min = 50, max = 80)
+x.mean <- mean(xunif)
+x.var  <- var(xunif)
+```
+
+```{r Q1b}
+#' variables required: xbern.p
+#' plots required: NA
+
+## Question 1.b
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+xbern   <- rbinom(200, 1, 0.25)
+xbern.p <- mean(xbern) # = sum of ones / sample size
+
+# Estimation error
+xbern.p - 0.25
+
+```
+
+------------------------------------------------------------------------
+
+### Q2. Sampling distribution of the mean
+
+```{r Q2a}
+#' variables required: NA
+#' plots required: histogram
+
+## Question 2.a
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+
+# Your code here
+nreps <- 1000
+mu0 <- 4
+sd0 <- 2
+N <- 5
+xbar.vector <- sapply(1:nreps, \(i) mean(rnorm(N, mean = mu0, sd = sd0)))
+
+# Basic histogram
+hist(xbar.vector, las=1, breaks = 25)
+
+# ggplot
+library(ggplot2)
+ggplot(data.frame(xbar.vector), aes(x = xbar.vector)) + 
+  geom_histogram(bins = 25) + 
+  theme_minimal()
+
+```
+
+```{r Q2b}
+#' variables required: xbar.mean, xbar.sd
+#' plots required: NA
+
+## Question 2.b
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+xbar.mean <- mean(xbar.vector)
+xbar.sd   <- sd(xbar.vector)
+
+cat("\nExpected mean =", mu0, "; Observed mean of sample means =", xbar.mean)
+cat("\nExpected se =", sd0/sqrt(N), "; Observed se =", xbar.sd)
+
+```
+
+------------------------------------------------------------------------
+
+### Q3. Bias of an estimator
+
+```{r Q3}
+#' variables required: xvar.vector, xvar.bias
+#' plots required: histogram
+
+
+## Question 3
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+var.mle <- function(x){
+  (1 / length(x)) * sum((x - mean(x))^2)
+}
+
+n <- 20
+nreps <- 2000
+
+xvar.vector <- sapply(1:nreps, \(x) var.mle(rnorm(n)))
+
+xvar.bias <- mean(xvar.vector) - 1
+
+cat("Estimated bias:", xvar.bias)
+
+hist(xvar.vector)
+
+```
+
+------------------------------------------------------------------------
+
+### Discussion: Maximum Likelihood Estimation (MLE)
+
+Example of using the R function `optim()` to estimate the MLE values for the mean 
+and variance of a normal distribution. _You don't need to change anything in the 
+code block below._
+
+```{r example}
+## This is just an example
+
+set.seed(1)
+n    <- 100000 # sample size
+mu   <- 12     # true mean
+var  <- 9      # true variance
+
+
+# Generate sample
+x <- rnorm(n, mean = mu, sd = sqrt(var))
+
+# log-likelihood for Normal(mu, sigma^2), given a sample X
+# (Check lecture slides for the formula)
+llik <- function(par, X) {
+  mu     <- par[1]
+  sigma2 <- par[2]
+  n      <- length(X)
+  if (sigma2 <= 0) return(Inf)  # variance must be positive
+  llik <- -n * log(sqrt(2 * pi * sigma2)) - 0.5 * sum((X - mu)^2 / sigma2)
+  return(llik)
+}
+
+# Initial guesses for mu and sigma^2 
+# (any finite Real values of mu and of sigma2 > 0 should work)
+init <- c(mu = 0, sigma2 = 1) 
+
+# Run optimization
+fit <- optim(par = init, fn = llik, X = x, 
+             method = "L-BFGS-B",         # optimisation method to use
+             lower = c(-Inf, 1e-9),       # Enforce positive variance (minimal allowed value: 10^-9)
+             control = list(fnscale = -1) # To make it a maximisation problem
+)
+
+fit$par
+```
+
+### Q4: Numerical computation of MLE value
+
+```{r Q4a}
+## Question 4.a
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+# log-likelihood for Cauchy(theta), given a sample X
+llik.cauchy <- function(par, X) {
+  theta <- par[1]
+  n      <- length(X)
+  
+  llik <- -n * log(pi) - sum(log(1 + (X - theta)^2))
+  return(llik)
+}
+
+# Generate sample
+N <- 10000
+theta <- 5
+x <- rcauchy(N, location = theta)
+
+init <- c(theta = 1)
+
+# Run optimization
+fit <- optim(par = init, fn = llik.cauchy, X = x, 
+             method = "BFGS",         # optimisation method to use
+             control = list(fnscale = -1) # To make it a maximisation problem
+)
+
+fit$par
+
+```
+
+```{r Q4b}
+#' variables required: 
+#' Required plot: density
+
+## Question 4.b
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+N <- 2000
+theta <- 8
+n <- 50
+
+cauchy.vector <- numeric(N)
+for (i in 1:N){
+  z <- rcauchy(n, location = theta)
+  res <- optim(par = init, 
+               fn = llik.cauchy, 
+               X = z, 
+               method = "BFGS",
+               control = list(fnscale = -1)) 
+  cauchy.vector[i] <- unname(res$par)
+}
+
+ggplot(data.frame(cauchy.vector), aes(x = cauchy.vector)) + 
+  geom_density() + 
+  theme_minimal() + 
+  geom_vline(xintercept = theta, lty = 2, col = "red")
+
+
+```
+
+------------------------------------------------------------------------
+
+## Part II: Data visualisation
+
+### Q5: Basic plotting
+
+```{r Q5a}
+## Question 5.a
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+library(nycflights13)
+library(dplyr)
+delayed_flights_2h <- flights %>%
+  filter(dep_delay > 0, dep_delay < 120) %>%
+  slice_sample(prop = .1)
+
+ggplot(delayed_flights_2h, aes(x = dep_delay)) +
+  geom_histogram() + 
+  ggtitle("Basic histogram")
+
+ggplot(delayed_flights_2h, aes(x = dep_delay)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = .4) + 
+  theme_light() +
+  xlab("Departure delay") +
+  ggtitle("Histogram with some degree of personalisation")
+
+```
+
+```{r Q5b}
+## Question 5.b
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+ggplot(delayed_flights_2h, aes(x = dep_delay)) + 
+  geom_density() + 
+  ggtitle("Basic density plot") + 
+  xlab("Departure delay")
+```
+
+```{r Q5c}
+## Question 5.c
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+ggplot(delayed_flights_2h, 
+       aes(x = dep_delay, y = origin, fill = origin)) + 
+  geom_violin(alpha = .25)
+
+```
+
+
+```{r Q5d}
+## Question 5.d
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+ggplot(slice_sample(filter(flights, origin == "EWR"), prop = 0.1),
+       aes(x = dep_delay, y = arr_delay)) + 
+  geom_point(alpha = .1, colour = "red")
+
+```
+
+
+### Q6: Facetting and annotation
+
+
+```{r Q6a}
+## Question 6.a
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+ggplot(slice_sample(flights, prop = .1), aes(x = dep_delay, y = arr_delay, colour = origin)) + 
+  geom_point(alpha = .3, show.legend = FALSE) + 
+  geom_smooth(method = "lm", se = FALSE, linewidth = .5, colour = "black") + 
+  facet_wrap(origin ~ .)
+
+```
+
+```{r Q6b}
+## Question 6.b
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+(mycorr <- flights %>% group_by(origin) %>% summarise(cor = cor(arr_delay, dep_delay, use = "pairwise.complete.obs")))
+
+```
+
+
+```{r Q6c}
+## Question 6.c
+set.seed(MY_STUDENT_ID) # <--- Don't change this
+
+# Your code here
+mycorr <- mycorr %>%
+  mutate(cor = paste0("corr = ", signif(cor, 3)))
+
+ggplot(slice_sample(flights, prop = .20), aes(x = dep_delay, y = arr_delay, colour = origin)) + 
+  geom_point(alpha = .3, show.legend = FALSE) + 
+  geom_smooth(method = "lm", se = FALSE, linewidth = .5, colour = "black") + 
+  facet_wrap(origin ~ .) + 
+  geom_text(data = mycorr, aes(label = cor), x = 250, y = 1000, size = 3, colour = "black")
+
+```

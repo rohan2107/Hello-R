@@ -1,6 +1,6 @@
 ---
 title: "Assignment 03 - Solutions"
-author: "YOUR_NAME (YOUR_STUDENT_ID)"
+author: "Rohan Anthony (2704500)"
 subtitle: Statistical Computing and Empirical Methods
 output:
   pdf_document: default
@@ -152,6 +152,13 @@ for (i in 1:num_samples) {
   mle_variance <- sum((sample_data - sample_mean)^2)/n
   xvar.vector[i] <- mle_variance
 }
+
+ggplot() +
+  geom_histogram(aes(x = xvar.vector), bins = 50, fill = "lightblue", color = "black") +
+  labs(title = "Distribution of MLE Variance Estimates (n=20)",
+       x = "Estimated Variance",
+       y = "Count") +
+  theme_minimal()
 
 avg_mle_variance <- mean(xvar.vector)
 avg_mle_variance

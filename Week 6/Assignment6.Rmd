@@ -1,0 +1,471 @@
+---
+title: "Assignment 06 - Solutions"
+subtitle: "Statistical Computing and Empirical Methods"
+author: "ROHAN ANTHONY (2704500)"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+## A word of advice
+Think of the SCEM labs as going to the gym: if you pay a gym membership, but instead of working out you use a machine to lift the weights for you, you won't get the benefits.
+
+ChatGPT, DeepSeek, Claude and other GenAI tools can provide answers to most of the questions below. Before you try that, please consider the following: answering the specific questions below is not the point of this assignment. Instead, the questions are designed to give you the chance to develop a better understanding of estimation concepts and a certain level of _**statistical thinking**_. These are essential skills for any data scientist, even if they end up using generative AI - to write an effective prompt and to catch the common (often subtle) errors that AI produces when trying to solve anything non-trivial.
+
+A very important part of this learning involves not having the answers ready-made for you, but instead taking the time to actually search for the answer, trying something, getting it wrong, and trying again.
+
+So, make the best use of this session. The assignments are not marked, so it is much better to try the yourself even if you get incorrect answers (you'll be able to correct yourself later when you receive feedback) than to submit a perfect, but GPT'd solution.
+
+-----
+
+## IMPORTANT NOTES: 
+- **DO NOT** change the code block names. Enter your solutions to each question into the predefined code blocks. 
+- **DO NOT** add calls to `install.packages()` into your solutions. Some questions may require you to load packages using `library()`. Please do not use any other packages except the ones explicitly listed in the "setup" code block. 
+
+---
+
+## Setup
+
+This code block below sets up your session. The only think you should change in it is to replace `"ABCDEFG"` by your student ID number, which will be used as the seed for your random number generators.
+
+```{r ID, echo=FALSE, message=FALSE, warning=FALSE}
+## We will use your student ID as the seed for the random number generator.
+MY_STUDENT_ID <- 2704500 # <-- Replace "ABCDEFG" by your student ID number (as an integer, i.e., without quotes).
+```
+
+```{r Setup, echo=FALSE, message=FALSE, warning=FALSE}
+## DO NOT CHANGE ANYTHING IN THIS CODE BLOCK
+
+## Note: tidyverse includes:
+## ggplot2, dplyr, tidyr, readr, purrr, tibble, stringr, forcats, and lubridate.
+## You can load any of those packages, as needed
+
+allowed.packages <- c("tidyverse", "NHANES", "multcomp", "MKpower",
+                      "jsonlite", "jquerylib", "knitr", "rmarkdown")
+
+for (i in seq_along(allowed.packages)){
+  if(!(allowed.packages[i] %in% installed.packages()[, 1])){
+    install.packages(allowed.packages[i], 
+                     repos = "https://cloud.r-project.org",
+                     dependencies = c("Depends", "Imports", "Suggests"))
+  }
+}
+
+knitr::opts_chunk$set(echo = TRUE, collapse=TRUE)
+ignore <- runif(1) # To initialise the PRNG
+```
+```{r checkID, echo=FALSE}
+if(!is.numeric(MY_STUDENT_ID)){
+  stop("MY_STUDENT_ID MUST BE YOUR VALID NUMERIC ID.")
+} 
+```
+
+## Q1: Warm up:
+
+:::{#prompt .message style="color: blue;"}
+**a.** Follow the instructions to create a data frame `bp.df`. 
+:::
+
+```{r Q1a}
+#' Required variables: bp.df (data.frame)
+#' Required plots: NA
+library(NHANES)
+library(tidyverse)
+data("NHANES")
+bp.df <- NHANES %>%
+  filter(
+    Age >=25,
+    Age <=30
+  ) %>%
+  select(Gender, BPSysAve) %>%
+  drop_na(BPSysAve)
+dim(bp.df)
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Generate the plot indicated in the assignment brief. 
+:::
+
+```{r Q1b}
+#' Required variables: NA
+#' Required plots: violin+jittered plot
+ggplot(bp.df, aes(Gender, BPSysAve, fill = Gender)) +
+  geom_violin() +
+  geom_jitter(width = 0.1, size = 2, alpha = 0.7) +
+  theme_light()
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Create the required dataframe `bp.marital`.
+:::
+
+```{r Q1c}
+#' Required variables: bp.marital (data.frame); pval (numeric); ci95 (numeric)
+#' Required plots: NA
+bp.marital <- NHANES %>%
+  filter(
+    Gender == "male",
+    Age >= 30,
+    Age <= 40,
+    MaritalStatus %in% c("Married", "NeverMarried")
+  ) %>%
+  drop_na(BPSysAve, MaritalStatus) %>%
+  select(MaritalStatus, BPSysAve)
+tmp <- t.test(BPSysAve ~ MaritalStatus, data = bp.marital, conf.level = 0.95)
+tmp
+pval <- tmp$p.value
+pval
+ci95 <- tmp$conf.int
+ci95
+# Result is statistically significant for men between 30 and 40
+```
+
+## Q2: A/B test power and subgroup analysis
+
+:::{#prompt .message style="color: blue;"}
+**a.** Load the required data frame and produce the boxplots. 
+:::
+
+```{r Q2a}
+#' Required variables: df.ab1 (data.frame)
+#' Required plots: boxplots
+df.ab1 <- read.csv("session_ab_test.csv")
+head(df.ab1)
+
+ggplot(df.ab1, aes(age_band, session_duration_min, fill = group)) +
+  geom_boxplot()
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Add the new variable with the log-durations.
+:::
+
+```{r Q2b}
+#' Required variables: df.ab1.log (data.frame)
+#' Required plots: boxplots or violin plots
+df.ab1.log <- mutate(df.ab1, duration.log = log(session_duration_min))
+head(df.ab1.log)
+dim(df.ab1.log)
+
+ggplot(df.ab1.log, aes(age_band, duration.log, fill = group)) + 
+  geom_boxplot()
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Calculate the required sample size to get a set of tests with the desired statistical properties.
+:::
+
+```{r Q2c}
+#' Required variables: required_n_per_group (numeric)
+#' Required plots: NA
+h1 <- "one.sided"
+alpha <- 0.05 / 5
+delta <- 0.08
+pi.star <- 0.8
+sd.ref <- 0.3
+power <- 0.8
+tmp <- power.t.test(
+  delta = delta,
+  sig.level = alpha,
+  sd = sd.ref,
+  power = power,
+  type = "two.sample",
+  alternative = h1
+  )
+required_n_per_group <- ceiling(tmp$n)
+required_n_per_group
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Produce the required summary data frame with the available sample sizes.
+:::
+
+```{r Q2d}
+#' Required variables: NA
+#' Required plots: NA
+
+table(df.ab1$group, df.ab1$age_band)
+# Each grouped band is less than required_n_per_group, therefore available sample is not large enough
+```
+
+:::{#prompt .message style="color: blue;"}
+**e.** Create the modified dataframe `df.ab1.log2`.
+:::
+
+```{r Q2e}
+#' Required variables: df.ab1.log2 (data.frame)
+#' Required plots: NA
+df.ab1.log2 <- df.ab1.log %>%
+  mutate(new_age_band = ifelse(age_band %in% c("18-24", "25-43"),
+                               "younger",
+                               "older"))
+table(df.ab1.log2$group, df.ab1.log2$new_age_band)
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**f.** Perform the hypotheses tests and calculate the corrected p-values.
+:::
+
+```{r Q2f}
+#' Required variables: pvals.raw (numeric); pvals.holm (numeric)
+#' Required plots: NA
+
+younger_df <- subset(df.ab1.log2, new_age_band =="younger")
+older_df <- subset(df.ab1.log2, new_age_band == "older")
+
+t1 <- t.test(duration.log ~ group, data = younger_df,
+             alternative = "greater", conf.level = 0.95)
+t2 <- t.test(duration.log ~ group, data = older_df,
+             alternative = "greater", conf.level = 0.95)
+pvals.raw <- c(t1$p.value, t2$p.value)
+pvals.holm <- p.adjust(pvals.raw, method = "holm")
+pvals.raw
+pvals.holm
+
+# The differences are not statistically significant
+
+```
+
+## Q3: paired t test
+
+:::{#prompt .message style="color: blue;"}
+**a.** Load and prepare the data.
+:::
+
+```{r Q3a}
+#' Required variables: df.paired.t (data.frame)
+#' Required plots: NA
+
+df.paired <- readRDS("UPMSP_SA_full_results.rds")
+df.paired.t <- df.paired %>%
+  select(Algorithm, Instance, Makespan) %>%
+  filter(Algorithm %in% c("Full", "no-2SH")) %>%
+  group_by(Algorithm, Instance) %>%
+  summarise(MeanMS = mean(Makespan, na.rm = TRUE), .groups = "drop") %>%
+  arrange(Algorithm, Instance)
+dim(df.paired.t)
+```
+
+
+:::{#prompt .message style="color: blue;"}
+**b.** Formalise the test hypotheses
+:::
+
+:::{#Q3b .message style="color: black;"}
+
+Defining $d_j = y_{(no2sh), j} - y_{(full), j}$, the hypotheses can be written as:
+$$
+\begin{cases}
+H_0: \mu_D = 0\\
+H_A: \mu_D > 0
+\end{cases}
+$$
+:::
+
+:::{#prompt .message style="color: blue;"}
+**c.** Perform the paired t-test.
+:::
+
+```{r Q3c}
+#' Required variables: pval.paired (numeric); diff.paired (numeric); ci.paired (numeric)
+#' Required plots: NA
+
+df.wide <- df.paired.t %>%
+  pivot_wider(names_from = Algorithm, values_from = MeanMS)
+dim(df.wide)
+names(df.wide)
+
+diffs <- df.wide$`no-2SH` - df.wide$Full
+
+t.paired <- t.test(
+  x = df.wide$`no-2SH`,
+  y = df.wide$Full,
+  paired = TRUE,
+  alternative = "greater",
+  conf.level = 0.95
+)
+t.paired
+pval.paired <- t.paired$p.value
+diff.paired <- as.numeric(t.paired$estimate)
+ci.paired <- t.paired$conf.int
+effect_size <- diff.paired/ sd(diffs)
+effect_size
+# Results are statistically significant at the 95% confidence level
+  
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Ignore the pairing and run a simple t-test to see what comes out.
+:::
+
+```{r Q3d}
+#' Required variables: NA
+#' Required plots: NA
+t.unpaired <- t.test(
+  x = df.wide$`no-2SH`,
+  y = df.wide$Full,
+  paired = FALSE,
+  alternative = "greater",
+  conf.level = 0.95
+)
+t.unpaired
+pval.unpaired <- t.unpaired$p.value
+
+# This test was not able to detect the difference
+
+```
+
+## Q4: ANOVA
+
+:::{#prompt .message style="color: blue;"}
+**a.** Load the dataset and generate the data summary as instructed.
+:::
+
+```{r Q4a}
+#' Required variables: df.strat (data.frame); df.strat.stats (data.frame)
+#' Required plots: NA
+df.strat <- read.csv("business_strategies.csv")
+str(df.strat)
+dim(df.strat)
+
+df.strat.stats <- df.strat %>%
+  group_by(strategy) %>%
+  summarise(
+    meanRev = mean(Revenue30Days, na.rm = TRUE),
+    sdRev = sd(Revenue30Days, na.rm = TRUE),
+    N = n(),
+    .groups = "drop"
+  )
+df.strat.stats
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Generate the faceted normal QQ-plots
+:::
+
+```{r Q4b}
+#' Required variables: NA
+#' Required plots: faceted qqplots
+
+ggplot(df.strat, aes(sample = Revenue30Days)) +
+  geom_qq(size = 1.2) +
+  geom_qq_line() +
+  facet_wrap(~ strategy, scales = "free") +
+  theme_minimal()
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Perform the Fligner-Kileen test
+:::
+
+```{r Q4c}
+#' Required variables: NA
+#' Required plots: NA
+fligner_res <- fligner.test(Revenue30Days ~ strategy, data = df.strat)
+fligner_res
+# p > 0.05 so we fail to reject the null hypothesis
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Perform the ANOVA
+:::
+
+```{r Q4d}
+#' Required variables: aov.strat (aov)
+#' Required plots: NA
+aov.strat <- aov(Revenue30Days ~ strategy, data = df.strat)
+summary(aov.strat)
+# Since p < 0.01 we reject the null hypothesis at the 99% confidence level
+```
+:::{#prompt .message style="color: blue;"}
+**e.** Update the dataframe `df.strat` and the anova object `aov.strat`, then perform the post-ANOVA multiple testing using the sequential contrast "Tukey".
+:::
+
+```{r Q4e}
+#' Required variables: df.strat (data.frame); aov.strat (aov); strat.tukey (glht)
+#' Required plots: NA
+df.strat$strategy <- as.factor(df.strat$strategy)
+library(multcomp)
+aov.strat <- aov(Revenue30Days ~ strategy, data = df.strat)
+summary(aov.strat)
+strat.tukey <- glht(aov.strat, linfct = mcp(strategy = "Tukey"))
+print(strat.tukey)
+```
+
+## Q5: Blocked ANOVA
+
+:::{#prompt .message style="color: blue;"}
+**a.** Load and prepare the data.
+:::
+
+```{r Q5a}
+#' Required variables: df.cbd (data.frame)
+#' Required plots: NA
+df.full <- readRDS("UPMSP_SA_full_results.rds")
+df.cbd <- df.full %>%
+  group_by(Algorithm, Instance) %>%
+  summarise(
+    MeanMS = mean(Makespan, na.rm = TRUE),
+    .groups = "drop"
+  )
+df.cbd$Algorithm <- as.factor(df.cbd$Algorithm)
+df.cbd$Instance <- as.factor(df.cbd$Instance)
+
+df.cbd$Algorithm <- relevel(df.cbd$Algorithm, ref = "Full")
+head(df.cbd)
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**b.** Perform a blocked ANOVA test
+:::
+
+```{r Q5b}
+#' Required variables: NA
+#' Required plots: NA
+aov.cbd <- aov(MeanMS ~ Algorithm + Instance, data = df.cbd)
+summary(aov.cbd)
+
+```
+
+:::{#prompt .message style="color: blue;"}
+**c.** Perform the Dunnett test to check which methods are significantly different from the reference one.
+:::
+
+```{r Q5c}
+#' Required variables: cbd.mht
+#' Required plots: NA
+cbd.mht <- glht(aov.cbd, linfct = mcp(Algorithm = "Dunnett"))
+summary(cbd.mht)
+```
+
+:::{#prompt .message style="color: blue;"}
+**d.** Generate the visualisation of the differences.
+:::
+
+```{r Q5d}
+#' Required variables: NA
+#' Required plots: confidence intervals
+ci_mat <- as.data.frame(confint(cbd.mht, level = 0.99)$confint)
+ci_mat$comparison <- rownames(ci_mat)
+rownames(ci_mat) <- NULL
+names(ci_mat)[1:3] <- c("Estimate", "lwr", "upr")
+
+ggplot(ci_mat %>% arrange(Estimate), aes(x = reorder(comparison, Estimate), y = Estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lwr, ymax = upr), width = 0.25) +
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_minimal()
+
+better_than_full <- ci_mat %>% filter(upr < 0) %>% pull(comparison)
+better_than_full
+not_sig_worse <- ci_mat %>% filter(!(lwr > 0)) %>% pull(comparison)
+not_sig_worse
+```

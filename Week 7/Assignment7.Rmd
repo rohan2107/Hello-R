@@ -1,0 +1,499 @@
+---
+title: "Assignment 07"
+subtitle: "Statistical Computing and Empirical Methods"
+output: html_document
+---
+
+## A word of advice
+
+Think of the SCEM labs like going to the gym: if you pay for gym membership, but instead of working out you use a machine to lift the weights for you, you won’t grow any muscle.
+
+ChatGPT, DeepSeek, Claude and other GenAI tools can provide answers to most of the questions below. Before you try that, please consider the following: answering the specific questions below is not the point of this assignment. Instead, the questions are designed to give you the chance to develop a better understanding of estimation concepts and a certain level of **statistical thinking**. These are essential skills for any data scientist, even if they end up using generative AI - to write an effective prompt and to catch the common (often subtle) errors that AI produces when trying to solve anything non-trivial.
+
+A very important part of this learning involves not having the answers ready-made for you but instead taking the time to actually search for the answer, trying something, getting it wrong, and trying again.
+
+So, make the best use of this session. The assignments are not marked, so it is much better to try them yourself even if you get incorrect answers (you’ll be able to correct yourself later when you receive feedback) than to submit a perfect, but GPT’d solution.
+
+-----
+
+## Introduction
+
+Before starting, make sure you have reviewed the Week 7 lecture slides. Additionally, download the following data file from Blackboard and save it in the same folder as your solutions Rmarkdown. We will use these files for some of the questions in this assignment.
+
+- *TBP_data.rds*
+
+This assignment will be done in **RStudio**. To enter your solutions, please use the pre-structured R markdown template provided for this week. This is a similar format to what you will use in the final coursework.
+
+**You do not need to submit anything for this assessment.** Feedback will be provided on the labs, and in the form of model answers in the following week.
+
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+# preloading the packages here can prevent inconvenient loading messages from
+# showing up in the middle of the text.
+
+## install if needed using install.packages()
+library(dplyr)
+library(tidyr)
+library(forcats)
+library(tidymodels)
+
+library(DataExplorer)
+library(visdat)
+
+library(ggplot2)
+library(GGally)
+library(ggridges)
+```
+
+## Introduction
+In this lab we will discuss exploratory data analysis (EDA), which corresponds to the first part of Task II in the final SCEM coursework. EDA, also sometimes called _data understanding_, is often the first contact of the data scientist with the actual data in any particular project, and the exploratory process is essential to gain a general understanding of:
+
+- broad data characteristics such as the size of the data (number of observations and attributes, data types, etc.); 
+
+- data quality issues and other data specificities such as missing data, repeated observations, duplicated variables, presence of outliers, large differences in scale, etc. 
+
+![](crispdm.png)
+
+The insights gained during EDA will inform different types of _data preprocessing_ (called "prepare data" in the CRISP-DM diagram above [[Source](https://michael-fuchs-python.netlify.app/2020/08/21/the-data-science-process-crisp-dm)]. Data preprocessing and EDA are often done iteratively, but this week  we'll focus only on the former, and leave data pre-processing for next week. Keep in mind, however, that these two steps are often strongly linked. 
+
+As is usual in EDA, you will perform some transformations in the data as you explore it - to test ideas, etc. Don't worry too much - you can always re-load the "raw" data and keep testing things. Just keep a good log of what you're doing, so that you can replicate only the relevant parts later, when you consolidate your data transformations in the _data preprocessing_ step.
+
+There are several R packages that can be useful for EDA, besides our usual visualisation workhorse `ggplot2`. A few useful ones include:
+
+- `DataExplorer` ([quick tutorial](https://cran.r-project.org/web/packages/DataExplorer/vignettes/dataexplorer-intro.html))
+- `visdat` ([quick tutorial](https://cran.r-project.org/web/packages/visdat/vignettes/using_visdat.html)), useful to visually explore patterns of values and missingness in dataframes.
+- `summarytools` ([quick tutorial](https://cran.r-project.org/web/packages/summarytools/vignettes/introduction.html))
+- `brinton` ([quick tutorial](https://sciencegraph.github.io/brinton/))
+- `SmartEDA` ([paper](https://joss.theoj.org/papers/10.21105/joss.01509))
+- `GGAlly`([quick guide](https://ggobi.github.io/ggally/index.html))
+
+These tools provide some interesting functionalities to perform data exploration, but - more importantly - they can provide _broad ideas_ in terms of what to check. It is important to keep in mind that most EDA guides you'll find online (including many functions in the packages indicated above) provide functions that *only really make sense for low-dimensional data*. For datasets with large numbers of features (such as the one in Task II of the coursework) most graphic profiling and tabulating functions will either crash your machine (as it runs out of memory) or, in the best case, result in tables or plots that don't communicate any insights on the data, from the sheer volume of information displayed. 
+
+To perform EDA in high-dimensional data, the data scientist needs have a clear idea of what aspect of the data they're really trying to investigate, and then be clever in terms of how to interrogate the data in a directed, specific manner.
+
+-----
+
+In this lab, you'll see code examples of some relevant EDA skills, using a dataset related to business bankrupcy in Taiwan between the years 1999 and 2009, originally collected from the Taiwan Economic Journal for the years 1999 to 2009. (Similar datasets could emerge in several different domains in science and engineering). This data was originally sourced from [the UCI machine learning repository](https://archive.ics.uci.edu/dataset/572/taiwanese+bankruptcy+prediction) (where you can find more details and a full explanation of the dataset), and slightly modified to allow us to practice some specific EDA aspects. This data is available in file `TBP_data.rds`.
+
+This document is structured as a follow-along tutorial. Try to understand **why** each exploration is being done, and **what** we learn from it, reproduce the code in your own R session, check the documentation of relevant functions, try different parameter values, etc. Remember that each dataset is different, so if you simply try to follow the example below blindly for a different dataset (such as the one for Coursework Task II) it won't work. You need to _think_ about what you're doing in EDA, and there is no magical one-size-fits-all recipe that can be taught - only broad exploration principles.
+
+---- 
+
+The first step in the exploration of the Taiwan Bankrupcy Dataset is to load the data and get a glimpse of it - its size, names and types of variables, and whether there's evidence that any of the variables has the incorrect type. At this stage, it is often useful to have access to a _data dictionary_, a full description of what each variable is supposed to represent, so that we can check the sanity of the data file more thoroughly. For the sake of agility you can skip this for the present exercise, but if you really want to check it, you can check the  [data description](https://archive.ics.uci.edu/dataset/572/taiwanese+bankruptcy+prediction).
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(DataExplorer) ## <--- install if needed
+library(visdat)       ## <--- install if needed
+
+# Read data
+TBD_data <- readRDS("TBP_data.rds")
+
+glimpse(TBD_data)
+```
+
+We can see three variables that appear to be binary, but coded as numeric: one is the target variable `Bankrupt.`, and the other two are variables with names ending with "flag" - a good suggestion that they are supposed to be binary flags. For the predictors the difference is not critical, but for discrete class attributes it is often useful to convert them to `factor` attributes (it is expected by some downstream modelling functions). However, before we continue with our data exploration, we need to discuss data splitting:
+
+### A brief detour: early data splitting and grouping structures in the data
+
+If the final objective is to build a predictive model, this point (very early in the project) is where it would be a good idea to isolate a portion of your data for final model assessment - i.e., to split your data into a _model development set_ (which you will continue exploring, and may later split further into training and validation subsets) and a _holdout set_ (for final model assessment). It is usually good practice to isolate this subset of the data data as early as possible in the exploration cycle, so that later you have a portion of your data that represents a good proxy for what "new", "unseen" data (i.e., data that your model will eventually be tasked with generating predictions for) looks like.
+
+In practical scenarios, this early data splitting can be performed as soon as you have a good sense of whether there are _dependencies or grouping structures_ in your observations. Just like with statistical inference, what represents a dependency/grouping structure in the data is based on which population (in the statistical sense) your model is expected to generalise for. This is important because data dependencies induce constraints on what counts as an _independent_ holdout set. 
+
+We can illustrate this using our very simple example of measuring the time it takes for people to run 100 meters. Imagine that you have observations related to 50 individuals, and for each individual you have 10 trials of the time that the person required to run 100m on different days, together with other data (biometric values, clothes, shoes, diet on the day of the test, etc), and you're trying to build a predictive model that could generalise to new people (outside the available sample). In this scenario, observations related to a given individual need to be considered together as a group rather than as independent observations, since the factor "person" induces within-group correlations due to each person's individual characteristics. Consequently, any data splitting needs to be done at the level of the person, to prevent a problem known as [data leakage](https://www.ibm.com/think/topics/data-leakage-machine-learning).
+
+The key takeaways here is:
+
+- Perform a preliminary, light exploration of your full data
+- Identify potential dependence structures in the data (from the dataset variables, or learned from domain expertise)
+- Isolate a _holdout set_ considering any potential data dependencies, so that you can keep some data as a proxy of what "new" observations will look like once you deploy your model, and later use this holdout set for model performance assessment.
+
+-----
+
+Going back to the bankrupcies dataset, let's assume (based on the [data description](https://archive.ics.uci.edu/dataset/572/taiwanese+bankruptcy+prediction)) that there are no dependency structures in the data. In this case, we can simply split out a holdout set through random sampling (without replacement) a certain proportion of the data, and storing it separately. Although this can be done quite easily both in base R and using dplyr, an easy way of doing data splitting is implemented in R package `rsample` (and re-exported as part of `tidymodels`): 
+
+```{r}
+# Isolate 20% of the data as a holdout set. 
+set.seed(666)
+
+# initial_split() does a random splitting. If there was a grouping variable, 
+# you would use group_initial_split() instead.
+library(tidymodels)
+split <- initial_split(TBD_data, prop = 0.8)
+
+# Extract the specific sets from the original split
+df.dev     <- training(split)
+df.holdout <- testing(split)
+
+# save the holdout split in a separate file and keep it reserved
+# until the end of the modelling activities.
+saveRDS(df.holdout, "TBD_holdout.rds")
+
+# remove the holdout and the original data from the R environment
+# to prevent accidental "peeking" into the reserved data.
+rm(df.holdout, TBD_data)
+```
+
+We can now proceed from where we had stopped: converting the target "class" variable into a factor:
+
+```{r, }
+df.dev <- df.dev %>%
+  mutate(Bankrupt. = as.factor(Bankrupt.),
+         Liability.Assets.Flag = as.logical(Liability.Assets.Flag),
+         Net.Income.Flag       = as.logical(Net.Income.Flag))
+
+glimpse(df.dev)
+```
+
+The summary from `glimpse()` suggests a few other issues worthy of attention: the presence of at least some missing values, and some variables defined on very different scales. 
+
+```{r}
+# From package DataExplorer
+introduce(df.dev) %>%
+  t() # transpose the result of `introduce()` for easier view
+```
+
+This shows a total of ~16k missing values in this dataset, which needs to be investigated. There are several ways to do that, but an easy initial one is using package `visdat`:
+
+```{r, fig.height=10, fig.width=10}
+# From package visdat
+# vis_miss returns a normal ggplot object, which means you can adjust the theme 
+# as needed using the ggplot2's theme()
+vis_miss(df.dev) +
+  theme(axis.text.x.top = element_text(angle = 90, size = 5))
+```
+
+This figure reveals a few interesting things: there are three columns with a very large proportion of missing values, making them primary targets for removal. But there are also scattered missing values across the dataset, which we will need to address later.
+
+```{r, fig.height=10, fig.width=10}
+library(forcats) # <--- part of tidyverse, useful for working with factors
+
+## This provides an ordered list of variables with most missing values
+missdat <- data.frame(Var = as.factor(names(df.dev)),
+                      PercNA = sapply(df.dev, \(x){100*mean(is.na(x))})) %>%
+  mutate(Var = fct_reorder(Var, .x = PercNA, .desc = TRUE)) # <-- reorder factor levels
+
+ggplot(missdat, aes(x = Var, y = PercNA)) + 
+  geom_bar(stat = "identity") + 
+  theme_minimal() + ylab("Percent NA") + xlab("") +
+  theme(axis.text.x = element_text(angle=90, hjust = 1))
+
+
+```
+
+It's quite clear that we have three variables with around 80% missing values. Unless there's some evidence that the missingness is not random (in which case it may carry a predictive signal), it is usually safe to remove variables with such high proportions of missingness:
+
+```{r, fig.height=10, fig.width=10}
+toRM <- missdat %>% filter(PercNA > 70)
+idx  <- which(names(df.dev) %in% toRM$Var)
+
+if(length(idx) > 0) df.dev[, idx] <- NULL
+
+## Check again 
+vis_miss(df.dev) +
+  theme(axis.text.x.top = element_text(angle = 90, size = 5))
+```
+
+For the occasional "rogue" missing values, imputation strategies can usually be deployed to insert placeholder or estimated values instead (See, e.g., <https://www.theanalysisfactor.com/seven-ways-to-make-up-data-common-methods-to-imputing-missing-data/>).
+
+Since missing values tend to affect some functions used to calculate statistical summaries, we'll provisionally perform _imputation_ of the missing data. When we discuss _data preprocessing_ we'll see how to do this properly with package `recipes`, but for EDA purposes we can do it manually. To reduce the effect of possible _outliers_, we'll perform imputation based on the _trimmed mean_, i.e., the mean of a variable not considering the upper/lower x% of the data. We'll arbitrarily set the trimming percentage to 10% here.
+
+**IMPORTANT**: we perform imputation on the **predictive features**, not on the target variable! The target variable is precisely what we want to be able to predict, and imputing missing values in this variable only adds noise to our training data. As a rule, observations with missing target variables are removed in standard supervised learning contexts.
+
+```{r}
+# Perform trimmed mean imputation on all numerical variables
+tmp.num <- df.dev %>%
+  dplyr::select(where(is.numeric)) %>%
+  lapply(\(x){ifelse(is.na(x), 
+                     mean(x, trim = 0.1, na.rm = TRUE),
+                     x)}) %>%
+  as.data.frame()
+
+# Perform mode (most common value) imputation for logical predictors
+tmp.logi <- df.dev %>%
+  dplyr::select(where(is.logical)) %>%
+  lapply(\(x){ifelse(is.na(x), 
+                     as.logical(round(mean(x, na.rm = TRUE))), # <- mode of a logical variable
+                     x)}) %>%
+  as.data.frame()
+
+# Check imputation result
+plot_missing(bind_cols(tmp.num, tmp.logi))
+
+# Reassemble dataframe with imputted columns
+df.dev <- df.dev %>%
+  select(Bankrupt.) %>%
+  bind_cols(tmp.num, tmp.logi)
+
+# Remove observations with missing target variable
+df.dev <- df.dev %>%
+  filter(!is.na(Bankrupt.))
+
+cat("Total remaining NAs in data:", sum(is.na(df.dev)))
+```
+To gain a sense of the _balance_ of our categorical target variable (i.e., how many observations with each class value) we can simply do:
+
+```{r}
+cat("Observations per class:")
+table(df.dev$Bankrupt.)
+
+cat("Proportion of different classes in the data")
+table(df.dev$Bankrupt.) / nrow(df.dev)
+
+```
+We can see a very heavily imbalanced class distribution, with about 3% of observations of class `Bankrupt. == 1` and around 97% being of class `Bankrupt. == 0`. This can be problematic for learning methods (we'll see why when we discuss the modelling and evaluation steps), so it's also something to record.
+
+We also need to check the _scale_ of the numerical features. This is quite easily done for low-dimensional data (using basic summary tables), but needs some thinking for high-dimensional cases, to prevent information overload. Printing a table of all maximum and minimum values is impractical when you have lots of features, since a table with hundreds or thousands of rows is unlikely to be very useful to the analyst. Instead, we should find ways of checking variable ranges that scale well with the number of attributes. 
+
+One way that can provide some easy visuals is to plot the variable ranges / mean values to check for large differences of scale:
+
+```{r}
+
+# build a tmp dataframe with summary stats
+tmp <- df.dev %>% select(where(is.numeric))
+tmp <- 
+  data.frame(
+    Var  = names(tmp[, -1]),            # var names
+    Min  = apply(tmp[, -1], 2, min),    # minima
+    Max  = apply(tmp[, -1], 2, max),    # maxima
+    Mean = apply(tmp[, -1], 2, mean)    # mean
+  ) 
+
+# Plot min-mean-max:
+tmp %>%
+  ggplot(aes(x = Var, y = Mean, ymin = Min, ymax = Max)) + 
+  geom_pointrange() + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5)) + 
+  labs(title = "Min-Mean-Max of variables",
+       x = "", y = "Value")
+
+# Plot variable ranges
+tmp %>%
+  mutate(Range = Max - Min,
+         Var = fct_reorder(Var, Range)) %>%
+  ggplot(aes(x = Var, y = Range)) + 
+  geom_point() + 
+  theme_minimal() + 
+  scale_y_log10() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5)) + 
+  labs(title = "Variable ranges",
+       x = "", y = "Range")
+```
+
+We see that a few variables have very large ranges (up to ~$10^{10}$) while others clearly have a much more compressed range. This is important to record, as it will need to be treated later as part of data preprocessing.
+
+Sometimes, the very large ranges can be a result of _outliers._ Outliers are values that differ considerably from the bulk of the data, and can bias data transformations and models if not treated appropriately. In low dimensional data, outlier detection is often performed by simple graphical inspection of univariate boxplots, but this would not work well for high-dimensional data. Instead, we need to be a bit more clever about this.
+
+One reasonably easy way of investigating possible univariate outliers is to check the difference between the ranges of the variables considering all observations vs. the range of variables after truncating the upper/lower 0.1% or 0.5% of observations. Large changes in the range indicate the presence of a minority of extreme values which may require closer inspection. The code below shows an example with a 0.1% threshold. 
+
+```{r}
+# Function to get range of truncated data
+myrange <- function(x, trim = 0){
+  n  <- length(x)
+  lo <- floor(n * trim) + 1
+  hi <- n + 1 - lo
+  return(diff(range(sort.int(x)[lo:hi])))
+}
+
+# Build tmp data frame with different ranges
+df.num <- df.dev %>% select(where(is.numeric))
+tmp <- data.frame(
+  Var       = names(df.num),                           # var names
+  Range.00  = apply(df.num, 2, myrange),               # ranges (original)
+  Range.01  = apply(df.num, 2, \(x) myrange(x, 0.001)) # ranges (trunc. 0.1%)
+) %>%
+  mutate(RangeRed = 1 - Range.01 / Range.00)
+
+ggplot(tmp, aes(x = Var, y = RangeRed)) + 
+  geom_point() + 
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5)) + 
+  labs(title = "Range reduction after truncating 0.01% upper/lower tails",
+       x = "", y = "Range Reduction")
+```
+For many variables in this dataset, removal of the upper/lower 0.01% of the data reduces the range by more than 50%! This is indicative of a long tail (in some cases, a very long tail) with a few extreme observations. For up to ~100 variables, we can examine the distributions with a ridgeplot:
+
+```{r, message=FALSE, fig.height=12}
+library(ggridges) # <--- install if needed
+
+# Scale variables for easier visualisation
+tmp2 <- df.num %>%
+  mutate(across(everything(), \(x) (x-min(x))/diff(range(x)))) %>%  # Scaling
+  pivot_longer(everything(), names_to = "Var", values_to = "Value")
+
+ggplot(tmp2, aes(x = Value, y = Var)) +
+  geom_density_ridges(fill = "blue", alpha = .5) +
+  theme_ridges() +
+  theme(legend.position = "none", axis.text.y = element_text(size = 5)) +
+  labs(title = "Distribution of each variable",
+       subtitle = "(high reduction ratios)",
+       y = "")
+
+```
+This plot reveals some interesting patterns. Recall that we have scaled all variables to the same 0-1 interval before plotting, so the smallest value is always equal to 0 and the largest is at 1. Variables that show a density as a small localised "peak" with a long tail on either side (i.e., most variables in this dataset) indicate extreme observations for the side(s) having a long tail. For instance the top one (`Working.capitcal.Turnover.Rate`) has a peak around 0.6 (normalised) with very long tails on both sides, and the bottom one (`Accounts.Receivable.Turnover`) seems to have a very long right tail. 
+
+Unlike many datasets that exhibit mostly one-sided tails, most of the variables for which we detected a pattern of a few extreme observations seem to have both lower AND upper outliers. This suggests Winsorisation (a.k.a. quantile capping) as a more promising strategy than log-transformation.
+
+Knowing this, we can deal with the combination of extreme values + very different variable scales during pre-processing, using a combination of winsorisation + min-max scaling.
+
+## Quick summary of EDA and insights for preprocessing
+By performing EDA in the Taiwan Bankrupcies Dataset, we found out a few interesting aspects of the data that could inform preprocessing:
+
+- We have a categorical target variable, `Bankrupt.`, which should be turned into a factor.
+- We have two binary predictor variables, `Liability.Assets.Flag` and `Net.Income.Flag`, which may be useful to code explicitly as logical variables.
+- There's no apparent dependency structure in the data. We already isolated a small proportion of data for final performance assessment and saved it separately.
+- There are three columns with most values missing: 
+   - `Research.and.development.expense.rate`
+   - `Persistent.EPS.in.the.Last.Four.Seasons`
+   - `Total.Asset.Growth.Rate`
+These variables can be removed from the data
+
+- There are some observations with missing values of the target variable. These should be removed from the training set.
+- We have about 0.5% of other, apparently randomly-occurring missing data, which will need to be treated (e.g., through imputation)
+- The target variable is strongly imbalanced (~97% of observations are of class `Bankrupt. == 0`). This needs to be addressed either during preprocessing or during modelling.
+- Variables come in very different scales / ranges, and many variables have extreme values. This can be addressed during preprocessing via a combination of winsorisation (to truncate the extreme values) + min-max scaling (to bring all variables to a common scale).
+
+
+-----
+## TO DO
+
+Now it's your turn. After following the EDA above and experimenting with it in your own R session, try performing EDA on the dataset for Task II of the final coursework. Use the ideas above, read the guides of some of the EDA packages listed (to get more ideas) and try your hand at understanding some aspects of your data.
+
+**Tip**: The description of Task II (available on BB) provides some ideas of things to check during EDA.
+
+```{r}
+df_data <- readRDS("df.rds")
+glimpse(df_data)
+
+df_data <- df_data %>%
+  mutate(Class = as.factor(Class))
+
+cat("\nClass counts:\n"); print(table(df_data$Class))
+cat("\nClass proportions:\n"); print(round(prop.table(table(df_data$Class)), 4))
+
+introduce(df_data) %>%
+  t()
+
+miss_summary <- tibble(
+  Var = names(df_data),
+  PercNA = 100 * sapply(df_data, function(x) mean(is.na(x)))
+) %>% arrange(desc(PercNA))
+
+print(head(miss_summary, 12))
+
+visdat::vis_miss(df_data, warn_large_data = FALSE) +
+  ggplot2::theme(axis.text.x.top = element_text(angle = 90, size = 6))
+
+drop_thresh <- 70
+drop_vars <- miss_summary %>% filter(PercNA > drop_thresh) %>% pull(Var)
+
+cat("Columns with >", drop_thresh, "% NA (will be removed for EDA):\n")
+print(drop_vars)
+
+# keep a working copy
+df_work <- df_data %>% select(-all_of(drop_vars))
+# record dropped columns
+dropped_high_NA <- drop_vars
+
+num_df <- df_work %>% select(where(is.numeric))
+
+num_stats <- data.frame(
+  Var = names(num_df),
+  Min = sapply(num_df, min, na.rm = TRUE),
+  Q1 = sapply(num_df, function(x) quantile(x, .25, na.rm = TRUE)),
+  Median = sapply(num_df, function(x) median(x, na.rm = TRUE)),
+  Mean = sapply(num_df, mean, na.rm = TRUE),
+  Q3 = sapply(num_df, function(x) quantile(x, .75, na.rm = TRUE)),
+  Max = sapply(num_df, max, na.rm = TRUE),
+  SD = sapply(num_df, sd, na.rm = TRUE)
+) %>% mutate(Range = Max - Min,
+             CV = abs(SD / (Mean + .Machine$double.eps)))
+
+# show top variables by Range and by CV
+cat("Top 15 vars by Range:\n"); print(head(num_stats %>% arrange(desc(Range)), 15))
+cat("\nTop 15 vars by Coef. of Variation:\n"); print(head(num_stats %>% arrange(desc(CV)), 15))
+
+# Min-Mean-Max compact plot (only if not huge number of cols)
+tmp_plot_df <- num_stats %>% arrange(Mean)
+ggplot(tmp_plot_df, aes(x = reorder(Var, Mean), y = Mean, ymin = Min, ymax = Max)) +
+  geom_pointrange() + coord_flip() +
+  theme_minimal() + labs(x="", y="Value", title="Min-Mean-Max of numeric variables (compact)")
+
+
+myrange <- function(x, trim = 0){
+  x <- x[!is.na(x)]
+  n  <- length(x)
+  if(n <= 2) return(0)
+  lo <- floor(n * trim) + 1
+  hi <- n + 1 - lo
+  return(diff(range(sort(x)[lo:hi], na.rm=TRUE)))
+}
+
+range_df <- data.frame(
+  Var = names(num_df),
+  Range_full = sapply(num_df, function(x) myrange(x, trim = 0)),
+  Range_trim01 = sapply(num_df, function(x) myrange(x, trim = 0.001))
+) %>% mutate(Reduction = 1 - Range_trim01 / (Range_full + 1e-12)) %>% arrange(desc(Reduction))
+
+cat("Top vars by range reduction (possible extreme tails):\n")
+print(head(range_df, 20))
+
+# quick scatter of Range reduction
+ggplot(range_df %>% slice_head(n = 200), aes(x = reorder(Var, Reduction), y = Reduction)) +
+  geom_point() + coord_flip() + theme_minimal() +
+  labs(title="Range reduction after trimming 0.1% tails (high = strong outliers)")
+
+top_vars <- num_stats %>% arrange(desc(SD)) %>% slice_head(n = min(20, nrow(num_stats))) %>% pull(Var)
+tmp_small <- num_df %>% select(all_of(top_vars))
+
+# scale 0..1 so comparisons are visual
+tmp_scaled <- tmp_small %>% mutate(across(everything(), ~ (. - min(., na.rm=TRUE)) / (diff(range(., na.rm=TRUE)) + 1e-12)))
+
+tmp_long <- tmp_scaled %>% pivot_longer(everything(), names_to = "Var", values_to = "Value")
+library(ggridges)
+ggplot(tmp_long, aes(x = Value, y = fct_rev(factor(Var)), fill = Var)) +
+  geom_density_ridges(alpha = 0.6, scale = 1) +
+  theme_minimal() + theme(legend.position = "none") +
+  labs(title = "Scaled distributions (top variables by SD)")
+
+# Q7g: correlation check (top_vars)
+corr_mat <- cor(tmp_small, use = "pairwise.complete.obs")
+# find highly correlated pairs
+corr_df <- as.data.frame(as.table(corr_mat)) %>% setNames(c("Var1","Var2","Corr")) %>%
+  filter(Var1 != Var2) %>% mutate(AbsCorr = abs(Corr)) %>% arrange(desc(AbsCorr))
+
+cat("Top correlated pairs (abs corr):\n"); print(head(corr_df, 20))
+
+# Plot heatmap (if not too big)
+library(reshape2)
+corr_melt <- reshape2::melt(corr_mat)
+ggplot(corr_melt, aes(x=Var1, y=Var2, fill=value)) + geom_tile() +
+  scale_fill_gradient2(low="blue", mid="white", high="red", midpoint=0) +
+  theme_minimal() + theme(axis.text.x = element_text(angle=90, size=7))
+
+rec_drop <- dropped_high_NA
+rec_large_range <- (num_stats %>% arrange(desc(Range)) %>% slice_head(n=10) %>% pull(Var))
+rec_winsor <- (range_df %>% filter(Reduction > 0.5) %>% slice_head(n=10) %>% pull(Var))
+
+cat("\nAUTOMATIC RECOMMENDATIONS:\n")
+cat("- Drop (high NA >70%):", if(length(rec_drop)==0) "None" else paste(rec_drop, collapse=", "), "\n")
+cat("- Large-range variables (consider log/winsorise/scale):", paste(rec_large_range, collapse=", "), "\n")
+cat("- Candidates for winsorisation (range reduction > 50%):", paste(rec_winsor, collapse=", "), "\n")
+cat("- Class proportions (again):\n"); print(round(prop.table(table(df_work$Class)), 4))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+

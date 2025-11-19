@@ -1,0 +1,520 @@
+---
+title: "Assignment 08"
+subtitle: "Statistical Computing and Empirical Methods"
+output: html_document
+---
+
+## A word of advice
+
+Think of the SCEM labs like going to the gym: if you pay for gym membership, but instead of working out you use a machine to lift the weights for you, you won’t grow any muscle.
+
+ChatGPT, DeepSeek, Claude and other GenAI tools can provide answers to most of the questions below. Before you try that, please consider the following: answering the specific questions below is not the point of this assignment. Instead, the questions are designed to give you the chance to develop a better understanding of estimation concepts and a certain level of **statistical thinking**. These are essential skills for any data scientist, even if they end up using generative AI - to write an effective prompt and to catch the common (often subtle) errors that AI produces when trying to solve anything non-trivial.
+
+A very important part of this learning involves not having the answers ready-made for you but instead taking the time to actually search for the answer, trying something, getting it wrong, and trying again.
+
+So, make the best use of this session. The assignments are not marked, so it is much better to try them yourself even if you get incorrect answers (you’ll be able to correct yourself later when you receive feedback) than to submit a perfect, but GPT’d solution.
+
+-----
+
+## Introduction
+
+Before starting, make sure you have reviewed the Week 8 lecture slides. 
+
+This assignment will be done in **RStudio**. **You do not need to submit anything for this assessment.** Feedback will be provided on the labs.
+
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+# preloading the packages here can prevent inconvenient loading messages from
+# showing up in the middle of the text.
+
+## install if needed using install.packages()
+library(dplyr)
+library(tidyr)
+library(forcats)  # to deal with factors
+library(recipes)  # preprocessing recipes
+
+# EDA / visualisation packages
+library(DataExplorer)
+library(visdat)
+library(ggplot2)
+library(GGally)
+library(ggridges)
+
+knitr::opts_chunk$set(echo = TRUE, collapse=TRUE)
+```
+
+## Introduction
+In this lab we will discuss data preprocessing (DPP), which corresponds to the second part of Task II in the final SCEM coursework. DPP, also sometimes called _data preparation_, is the bridge between understanding the data (during EDA) and building models to extract insights or predictions for the data-generating process. It is during DPP that we handle data quality issues (such as missing values) and precondition the data so that it is ready to be used for model fitting.
+
+![](crispdm.png)
+
+There are several R packages that can be useful for EDA. Some we already know - dplyr and tidyr, for instance - while others are new. Possibly the most useful R package for datya preprocessing is:
+
+- `recipes`, to build preprocessing workflows ([documentation and guides](https://recipes.tidymodels.org/articles/index.html))
+
+Some other packages are useful to deal with specific data types, e.g.:
+
+- `forcats`, to deal with factors ([documentation](https://forcats.tidyverse.org/))
+- `stringr`, to deal with strings ([documentation](https://stringr.tidyverse.org/))
+- `lubridate`, for date-time variables ([documentation](https://lubridate.tidyverse.org/))
+- `TSpred` for time-series data ([paper](https://www.sciencedirect.com/science/article/pii/S0925231221014454))
+
+-----
+
+In this lab, you'll see code examples of some relevant data preprocessing tasks, using a credit scoring dataset. As with last week's lab, please keep in mind that similar datasets do emerge in several different domains in science and engineering. The data for this week is made available as part of R package `modeldata`, which also provides several different datasets that you may want to use for practicing your data exploration and preprocessing skills.
+
+The credit scoring data has the following columns:
+
+- `Status`: credit status
+- `Seniority`: job seniority (years)
+- `Home`: type of home ownership
+- `Time`: time of requested loan
+- `Age`: client's age 
+- `Marital`: marital status 
+- `Records`: existance of records
+- `Job`: type of job
+- `Expenses`: amount of expenses
+- `Income`: amount of income
+- `Assets`: amount of assets
+- `Debt`: amount of debt
+- `Amount`: amount requested of loan
+- `Price`: price of good
+
+`Status` is the target to be predicted, and all others are potential predictor variables. We can also assume for now that there's no grouping structure in the data.
+
+This document is structured as a follow-along tutorial. It starts with a brief EDA of the dataset, then proceeds on to the required preprocessing transformations. Try to understand **why** each transformation  is relevant, reproduce the code in your own R session, check the documentation of relevant functions, try different parameter values, etc. 
+
+---- 
+
+Let's start by loading the data and taking a look at its structure:
+
+```{r}
+## Load packages (use install.packages() if needed)
+
+library(recipes)    # for preprocessing steps / workflow structure
+library(healthyR.ai)# for winsorisation function
+library(modeldata)  # for example data
+library(tidymodels) # for data splitting
+library(dplyr)      # for data manipulation
+library(tidyr)      # for data reshaping
+
+# For EDA and data visualisation
+library(ggplot2)
+library(DataExplorer)
+library(visdat)
+library(GGally)
+library(ggridges)
+
+## Load data
+X <- modeldata::credit_data
+
+# Glimpse 
+dplyr::glimpse(X, width = 80)
+
+```
+
+We have ~4500 observations and only 14 columns, which means we can probably use standard plotting-based EDA for most exploratory tasks. Before we do our first splitting of the data, let's check the balance of the target variable and whether it has any missing values:
+
+```{r}
+# Check balance (%) of each class in the target variable
+table(X$Status) / nrow(X)
+```
+
+```{r}
+# Check for missing values in the target variable
+sum(is.na(X$Status))
+```
+
+The categorical target variable (which we'll refer generically as the _class attribute_) is somewhat imbalanced (with an approximately 70:30 good-to-bad ratio and it only has two values, which makes this a _binary classification_ problem. It also doesn't have any missing values.
+
+It is good to consider the class imbalance when splitting the data, so that the approximate same balance is retained in all splits. For scenarios with many observations and slight imbalance ratios (up to 80:20, or even 90:10 if the number of observations is large and there is no grouping) random splitting tends to produce this automatically - but it doesn't hurt to force this in the splitting functions.
+
+To generate the initial split, we'll use function `initial_split()` from package `rsample` (which is loaded automatically when we load packages `tidymodels`). We'll retain 80% of the data for modelling, and save 20% as the final "holdout" test set.
+
+```{r}
+set.seed(20251119)
+
+# Function to generate random splits with stratification on the target variable
+mysplits <- initial_split(X, prop = .8, strata = "Status")
+
+# Attribute the splits generated by initial_splits() to specific variables that we can operate on
+Xmod     <- training(mysplits)
+Xtest    <- testing(mysplits)
+
+## You can use the lines below to check that the approximate class balance was retained on both splits:
+# table(Xmod$Status) / nrow(Xmod)
+# table(Xtest$Status) / nrow(Xtest)
+
+# Remove original (full) data from the R session to prevent us from 
+# accidentally using it instead of the modelling split Xmod. 
+# We can always reload it later if needed.
+rm(X)
+```
+
+*(Note: if we wished, we could also have stratified by multiple categorical columns, __in addition__ to the target variable. For that more sophisticated case, a combination of dplyr's `group_by()` and `sample_frac()` can be used.)*
+
+*(Note: if we had a grouping structure in the data, we would have used `group_initial_split()` instead.)*
+
+For this week's lab, we'll also limit ourselves to a simple train-test split. We'll use the entire modelling split, `Xmod`, for EDA and preprocessing, without further splitting. Next week we'll include cross-validation (or a further training-validation splitting) into the mix.
+
+Now that we have isolated a portion of the data for model development, we can start performing some EDA on it to gain a general sense of its main properties, data quality issues etc. First, let's check again how many columns of each type we have:
+
+```{r}
+# How many columns of which type?
+table(sapply(Xmod, class))
+```
+
+This reveals 9 numeric variables and 5 categorical (factor) ones, of which four correspond to possible predictors and one is the target variable. We'll deal with those two types of variables separately a bit later, but for now we can simply check for missing values regardless of variable type:
+
+```{r}
+visdat::vis_miss(Xmod) + 
+  theme(axis.text.x.top = element_text(angle = 90, hjust = 0)) 
+```
+
+We can see a few scattered NAs around, plus a larger amount (about 8%) in column "income". So we know that we'll need to handle those somehow in the preprocessing stage. Since the proportion of missing values is reasonably low, we'll probably implement some type of _imputation_. 
+
+Looking a bit more closely at the categorical variables to see if there aren't any missing values coded as something else (e.g., empty strings or labels that clearly mean "missing"):
+
+```{r}
+Xmod %>%
+  # Select only the factor variables.
+  select(where(is.factor)) %>% 
+  # Make the dataset "longer" for ggplot visualisation
+  pivot_longer(everything(), names_to = "Var", values_to = "Value") %>%
+  # Build visualisation
+  ggplot(aes(x = Value)) + 
+  geom_bar() + 
+  facet_wrap(.~Var, scales = "free") + 
+  theme_light() + 
+  theme(axis.text.x = element_text(angle=45, hjust = 1))
+```
+
+This plot provides insights into a few different aspects of those variables that may be useful for preprocessing:
+
+- `Home` has a level "ignore". We don't know enough to determine if that corresponds to missingness, so it's better to just bundle it together with "other".
+
+- `Marital` is dominated by two levels. We may want to bundle "divorced" together "separated".
+
+- `Status` is an imbalanced target variable (which we already knew) - we can deal with that in preprocessing (using, e.g.,  random undersampling of the majority class) or in modelling (using, e.g., weighted classification).
+
+- There are a couple of NAs in two of these categorical variables, which we'll deal with using mode-imputation.
+
+Let's now check the numerical variables. We can take a rough look at their scale (and `NA` prevalence) using `summary()`:
+
+```{r}
+Xmod %>%
+  # Select only the numeric variables
+  select(where(is.numeric)) %>%
+  summary()
+```
+
+We have some variables defined in very different scales, which will probably need to be scaled later. Also, a quick glance at the quantiles indicates that at least two variables are _zero-inflated_ (meaning that they have lots of zeros distorting their distributions): `Assets`, which has at least 25% of the data equal to zero (you can see that by noticing that both the `1st Quartile` and `Min` are equal to 0); and `Debt`, for which at least 50% of the data is zero (`Min` and `Median` both equal to 0). This can be problematic as it sometimes indicates variables that have two different, possibly conditional data-generating processes: one that regulates non-zeroness, another one that regulates values conditioned on it not being zero.
+
+Let's try to viasualise this. Given the differences of scale detected above, we'll plot the log values, using `log1p()` instead of `log()` to prevent the zeroes from generating errors.
+
+_(note: ggplot will throw a message indicating that 363 observations were removed from the plot - those are the `NA`s, you can check that by comparing the number in the ggplot warning with the total number of `NA`s in the numeric columns of the dataset.)_
+
+```{r}
+# Log-transform all variables for visualisation
+# Use log1p() instead of log() to prevent the zeroes in the data from generating errors.
+Xmod %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(everything(), names_to = "Var", values_to = "Value") %>%
+  mutate(Value = log1p(Value)) %>%
+  ggplot(aes(x = Var, y = Value)) + 
+  geom_boxplot()
+```
+
+Most variables seem to be fine with a log transformation, and we can probably use that in the preprocessing. This would need to be followed by winsorisation (to reduce the effect of extreme observations/outliers) and scaling (to bring the variables to a common scale). Variable `Time` may be better kept in its original scale:
+
+```{r}
+Xmod %>%
+  ggplot(aes(y = Time)) + 
+  geom_boxplot()
+```
+
+It looks a bit more symmetric about the median than the log-transformed version, so we can probably leave this one as-is.
+
+The other two variables that stand out from the plot are the two we highlighted earlier as being zero-inflated, `Assets` and `Debt`. Let's look more closely at them:
+
+```{r}
+Xmod %>%
+  select(Assets, Debt) %>%
+  mutate(LogAssets = log1p(Assets),
+         LogDebt   = log1p(Debt)) %>%
+  pivot_longer(everything(), names_to = "Var", values_to = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_density(fill = "blue", alpha = .5, bw = .1) +
+  facet_wrap(Var ~ ., scales = "free_x")
+```
+
+As we had detected earlier, there's quite a lot of zeroes in these variables, and in both cases it clearly looks like there are two processes at play: one that regulates zero vs. nonzero, and another that regulates the nonzero values:
+
+```{r}
+# Look only at the nonzero values
+Xmod %>%
+  select(Assets, Debt) %>%
+  pivot_longer(everything(), names_to = "Var", values_to = "Value") %>%
+  filter(Value != 0) %>%
+  ggplot(aes(x = Value)) +
+  geom_density(fill = "blue", alpha = .5, bw = .1) +
+  facet_wrap(Var ~ ., scales = "free_x") +
+  scale_x_log10() +
+  ggtitle("Only nonzero values", "(Log-scale)")
+```
+
+Dealing with zero-inflated features is usually a bit tricky. One way is to split the variables into a binary "indicator" variable (0 vs. non-0) and another variable with the actual value for the nonzero cases. This, however, also requires specialised modelling and tends not to play well with standard preprocessing routines.
+Another way of dealing with this type of issue (simpler, but leading to some information loss) is to discretise the numerical variables into buckets, and treat them as ordinal variables. For instance, based on the plots above, we could have:
+
+- `Debt`: (0, 0 - 500, 500 - 1000, 1000-5000, >5000)
+- `Assets`: (0, 0 - 1000, 1000 - 10000, 10000-100000, >100000)
+
+Note that we'll need to think about the missing values in these two variables as well. This may be quite difficult, as we don't know if it would be safer to impute them as zeroes or using the mean of nonzero values. We'll try using kNN-based imputation (imputting their values based on the k- most similar observations to the ones having missing values).
+
+-----
+
+To summarise what EDA has informed us in terms of the necessary preprocessing steps:
+
+- We'll need to treat `NA`s in categorical variables. Mode-based imputation can be used. We could do one-hot encoding if we wanted to use models that don't deal well with qualitative variables, but for now we'll leave the factor predictors as-is.
+
+- After imputation, we'll combine level "ignore" into "other" for factor variable `Home`; and combine "divorced" with "separated" in factor variable `Marital`.
+
+- We'll need to treat numerical variables with different scales, missing values and zero-inflation. From our EDA, a strategy can be suggested:
+
+1. For variable `Time`, we'll perform imputation by winsorised mean and scaling.
+
+2. For variables `Age`, `Amount`, `Income` and `Price`, we'll perform log-transformation followed by winsorisation ("quantile capping") and scaling. We'll perform imputation by winsorised mean. This can be done either before or after the log-transformation, since quantiles are preserved by this transformation.
+
+3. For variable `Expenses` and `Seniority`, we'll perform log-transformation followed by scaling. The log of those variables seems to have short tails (no highlighted points in the boxplots), so winsorisation is unnecessary. Note that variable `Seniority` contains zeros (as can be seen from the summary) so we'll need to use `log1p()` for that one. We'll also perform imputation by winsorised mean.
+
+4. For variables `Debt` and `Asset`, we'll perform discretisation using user-defined bands. We'll also perform imputation by k-nearest neighbours. Since kNN is a scale-dependent method, imputation in these cases needs to come after the scaling of the remaining variables in the preprocessing stack.
+
+
+Notice that some variables, such as `Time`, have no missing values in the training data, but we don't know if missing values may be present in the test data or on new data - we'll add an imputation step just in case (it does not change anything in case there's no missing data).
+
+----
+
+Having done the basic exploration of the data, we can now proceed to act on the insights gained during EDA. For that, we'll use package `recipes` plus a few auxiliary functions from other packages.
+
+As the name suggests, package `recipes` treats preprocessing steps as a recipe, and the function names reflect this wordplay from the authors. Recipes are initialised using function `recipe()`, then proprocessing tasks are included using functions starting with `step_`. Once assembled, a recipe is "prepared" (i.e., the transformation constants are calculated) using function `prep()`, and finally the recipe is applied to the data using function `bake()`. There are a couple of additional details, but this is the general idea.
+
+Before we proceed to acting on the insights of our EDA, let's do a very simple example first, composed only of:
+
+- mode imputation for categorical variables
+- winsorised mean imputation for numerical predictors
+- scaling of numerical attributes. We'll use "normalisation" instead of minmax since PCA works better with normalised variables.
+- dimensionality reduction using principal component analysis (PCA) for the numerical features
+
+```{r}
+simple_recipe <- recipe(Status ~ ., data = Xmod) %>%
+  # mode imputation for categorical predictors
+  step_impute_mode(all_factor_predictors()) %>%
+  # 10% winsorised mean imputation for numerical predictors
+  step_impute_mean(all_numeric_predictors(), trim = 0.1) %>%
+  # PCA-based dimensionality reduction (numeric variables only)
+  # retaining enough components to explain at least 90% of the data variability
+  # Note: PCA works better with centred/scaled (="normalised") variables
+  step_normalize(all_numeric_predictors()) %>%
+  step_pca(all_numeric_predictors(), threshold = .9)
+
+simple_recipe
+```
+
+Once the recipe is ready, we `prep()` it (which calculates all the transformation constants based on the training data used in the initial `recipe()` call):
+
+```{r}
+simple_recipe_prepped <- simple_recipe %>%
+  prep()
+
+simple_recipe_prepped
+```
+
+To check which variables were retained after the feature reduction, we can use:
+
+```{r}
+summary(simple_recipe_prepped)
+```
+
+We can see that the 9 numerical features were reduced to seven _principal components_ (PC1 - PC7) which represent specific, mutually independent linear combinations of the original attributes that are sufficient to account for (in this case) at least 90% of the total variability of the numeric features.
+
+To apply the learned transformations to any data set having the same structure as the data used to _fit_ the preprocessing transformations (in our case, that would be `Xmod` as well as `Xtest`) we can use `bake()`:
+
+```{r}
+Xmod.pp <- simple_recipe_prepped %>%
+  bake(Xmod)
+
+summary(Xmod.pp)
+
+# The same can be done with Xtest, for instance. But usually we don't need to do it explicitly, 
+# since we'll later encapsulate the preprocessing recipe within a modelling workflow. 
+# Xtest.pp <- simple_recipe_prepped %>%
+#   bake(Xtest)
+
+```
+
+Notice how the preprocessing transformations changed the model development set: there are no `NA`s anymore (since we imputed them away), and the 9 numerical variables were reduced to two principal components with essentially the same descriptive power. From here, you could (if you wanted) fit a predictive model using the (transformed) `Xmod`, then assess its performance on the (similarly transformed) `Xtest`. We'll learn how to do this properly in the next lab (but, if you want to look ahead, check [this short tidymodels case study](https://www.tidymodels.org/start/case-study/) and the other articles available in the tidymodels website).
+
+-----
+
+Now, let's build a slightly more complex preprocessing recipe, based on the insights we collected during EDA.
+
+```{r}
+dpp.stack <- recipe(Status ~ ., data = Xmod)
+dpp.stack %>% 
+  summary()
+```
+
+Notice that the formula object has started the recipe with a single "outcome" variable and everything else as "predictor" variables. **Roles** are important in `recipes` and can be used to select specific variables for targeted transformations. In most cases, we can use only "predictor" and "outcome", but we may change/remove/add new roles to any variable using `update_role()`, `add_role()` or `remove_role()`.
+
+As an example, we can add specific roles to separate the different types of preprocessing we're planning to execute on different groups of numerical variables:
+
+```{r}
+dpp.stack <- dpp.stack %>%
+  add_role(Age, Amount, Income, Price, new_role = "NumPredType2") %>%
+  add_role(Expenses, Seniority, new_role = "NumPredType3") %>%
+  add_role(Debt, Assets, new_role = "NumPredType4")
+dpp.stack %>%
+  summary()
+```
+
+Note that variables with multiple roles have one row per role in the recipe summary.
+
+We can add the steps to treat the factor variables first. To recall:
+
+_We'll need to treat `NA`s in categorical variables. Mode-based imputation can be used. After imputation, we'll combine level "ignore" into "other" for factor variable `Home`; and combine "divorced" with "separated" in factor variable `Marital`." _
+
+```{r}
+dpp.stack <- dpp.stack %>%
+  # mode imputation
+  step_impute_mode(all_factor_predictors()) %>%
+  # collapse factor levels using fct_collapse() from package `forcats`
+  step_mutate(Home = fct_collapse(Home, other = c("other", "ignore"))) %>%
+  step_mutate(Marital = fct_collapse(Marital, Unmarried = c("divorced", "separated")))
+
+# You can always check how that will go once the recipe is prepped:
+# dpp.stack %>%
+#   prep() %>%
+#   summary()
+```
+
+The next step is to treat the numeric variables.To recall:
+
+_For variable `Time`, we'll perform imputation by winsorised mean and scaling._
+
+```{r}
+dpp.stack <- dpp.stack %>%
+# mean imputation, using 10% winsorisation.
+step_impute_mean(Time, trim = 0.1) %>%
+# Minmax scaling
+step_normalize(Time)
+```
+
+We are using `step_normalize()` instead of the minmax scaler, `step_range()`, since PCA works better with normalised data.
+
+_For variables `Age`, `Amount`, `Income` and `Price`, we'll perform log-transformation followed by winsorisation ("quantile capping") and scaling. We'll perform imputation by winsorised mean. This can be done either before or after the log-transformation, since quantiles are preserved by this transformation._
+
+Recalling that we added the additional role "NumPredType2" to these variables, we can do:
+
+```{r}
+dpp.stack <- dpp.stack %>%
+  # mean imputation, using 10% winsorisation.
+  step_impute_mean(has_role("NumPredType2"), trim = 0.1) %>%
+  # Log transformation
+  step_mutate_at(has_role("NumPredType2"),fn = ~log(.x)) %>%
+  # Winsorisation at 5% (less extreme than the one used in the mean imputation)
+  step_hai_winsorized_truncate(has_role("NumPredType2"), fraction = .05) %>%
+  # Remove pre-winsorisation variables
+  step_rm(has_role("NumPredType2")) %>%
+  # Minmax scaling
+  step_normalize(has_role("NumPredType2"))
+
+dpp.stack
+```
+
+_For variable `Expenses` and `Seniority`, we'll perform log-transformation followed by scaling. The log of those variables seems to have short tails (no highlighted points in the boxplots), so winsorisation is unnecessary. Note that variable `Seniority` contains zeros (as can be seen from the summary) so we'll need to use `log1p()` for that one. We'll also perform imputation by winsorised mean._
+
+Recall that we added role "NumPredType3" to those variables, so we can do:
+
+```{r}
+dpp.stack <- dpp.stack %>%
+  # mean imputation, using 10% winsorisation.
+  step_impute_mean(has_role("NumPredType3"), trim = 0.1) %>%
+  # Log transformation
+  step_mutate(Expenses = log(Expenses),
+              Seniority = log1p(Seniority)) %>%
+  # Minmax scaling
+  step_normalize(has_role("NumPredType3"))
+```
+
+Finally, _for variables `Debt` and `Asset`, we'll perform discretisation using user-defined bands. We'll also perform imputation by k-nearest neighbours. Since kNN is a scale-dependent method, imputation in these cases needs to come after the scaling of the remaining variables in the preprocessing stack._
+
+- _`Debt`: (0, 0 - 500, 500 - 1000, 1000-5000, >5000)_
+- _`Assets`: (0, 0 - 1000, 1000 - 10000, 10000-100000, >100000)_
+
+```{r}
+dpp.stack <- dpp.stack %>%
+  # Ordinal encoding
+  step_cut(Debt, breaks = c(0.001, 500, 1000, 5000), 
+           include_outside_range = TRUE) %>%
+  step_cut(Assets, breaks = c(0.001, 1000, 10000, 100000), 
+           include_outside_range = TRUE) %>%
+  step_impute_knn(has_role("NumPredType4"))
+```
+
+Finally, we can try to reduce the dimensionality of the resulting dataset by one of many methods. For this example, we'll stick with PCA on the numeric variables, as we did in the simple recipe earlier. PCA
+
+```{r}
+dpp.stack <- dpp.stack %>%
+  # Perform PCA on the numeric predictors, retaining >=95% of total variance
+  step_pca(all_numeric_predictors(), threshold = 0.95)
+
+# Check the final sequence of steps in the recipe
+dpp.stack
+```
+
+Once we finish adding the preprocessing steps, we can `prep()` the recipe, then `bake()` it on the data:
+
+```{r}
+dpp.stack.prepped <- prep(dpp.stack)
+summary(dpp.stack.prepped)
+```
+
+```{r}
+Xmod.pp  <- bake(dpp.stack.prepped, Xmod)
+summary(Xmod.pp)
+# Xtest.pp <- bake(dpp.stack, Xtest)
+```
+From here, we can proceed to the final steps of modelling and assessment. Next week. :)
+
+-----
+## TO DO
+
+Now it's your turn. After following the example above and experimenting with it in your own R session, try performing data preprocessing on the dataset for Task II of the final coursework. Use the ideas above, read the guides of package `recipes` (to get more ideas) and try your hand at working with the coursework data.
+
+```{r}
+X <- readRDS("df.rds")
+
+X_recipe <- recipe(Class ~ ., data = X) %>%
+  step_impute_mode(all_factor_predictors()) %>%
+  step_impute_mean(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_pca(all_numeric_predictors())
+X_recipe
+
+X_recipe_prepped <- X_recipe %>% prep()
+X_recipe_prepped
+summary(X_recipe_prepped)
+
+X.pp <- X_recipe_prepped %>% bake(X)
+summary(X.pp)
+
+```
+
+
+
+
+
+
+
+

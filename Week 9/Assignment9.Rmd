@@ -1,0 +1,531 @@
+---
+title: "Assignment 09"
+subtitle: "Statistical Computing and Empirical Methods"
+output: html_document
+---
+
+## A word of advice
+
+Think of the SCEM labs like going to the gym: if you pay for gym membership, but instead of working out you use a machine to lift the weights for you, you won’t grow any muscle.
+
+ChatGPT, DeepSeek, Claude and other GenAI tools can provide answers to most of the questions below. Before you try that, please consider the following: answering the specific questions below is not the point of this assignment. Instead, the questions are designed to give you the chance to develop a better understanding of estimation concepts and a certain level of **statistical thinking**. These are essential skills for any data scientist, even if they end up using generative AI - to write an effective prompt and to catch the common (often subtle) errors that AI produces when trying to solve anything non-trivial.
+
+A very important part of this learning involves not having the answers ready-made for you but instead taking the time to actually search for the answer, trying something, getting it wrong, and trying again.
+
+So, make the best use of this session. The assignments are not marked, so it is much better to try them yourself even if you get incorrect answers (you’ll be able to correct yourself later when you receive feedback) than to submit a perfect, but GPT’d solution.
+
+-----
+
+## Introduction
+
+Before starting, make sure you have reviewed the Week 9 lecture slides. 
+
+This assignment will be done in **RStudio**. **You do not need to submit anything for this assessment.** Feedback will be provided on the labs.
+
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+# preloading the packages here can prevent inconvenient loading messages from
+# showing up in the middle of the text.
+
+## install if needed using install.packages()
+library(tidymodels)
+# Tidymodels automatically loads the following packages
+# broom, recipes, dials, rsample, dplyr, tibble, ggplot2,
+# tidyr, infer, tune, modeldata, workflows, parsnip
+# workflowsets, purrr, yardstick
+
+library(forcats)     # for factor manipulation
+library(healthyR.ai) # For winsorisation step
+library(rpart)       # for the decision tree engine
+
+
+
+knitr::opts_chunk$set(echo = TRUE, collapse=TRUE)
+```
+
+## Introduction
+In this lab we will discuss the final steps of CRISP-DM (modelling, evaluation and deployment), which corresponds to the final parts of Task II in the coursework. 
+
+There are several packages that implement different predictive models in R. 
+Within the _tidyverse_, the most useful R meta-package for the entire 
+modelling cycle is called _tidymodels_, which contains packages implementing all relevant components usually required in supervised learning. The most relevant for today's lab are the following:
+
+- [`rsample`](https://rsample.tidymodels.org) has infrastructure for
+data resampling and splitting, so that models can be assessed and empirically
+validated.
+
+- [`recipes`](https://recipes.tidymodels.org) is a general data
+preprocessor with a modern interface. It can create model matrices
+that incorporate feature engineering, imputation, and other help
+tools.
+
+- [`parsnip`](https://parsnip.tidymodels.org) is a tidy, unified
+interface to creating models.
+
+- [`dials`](https://dials.tidymodels.org) has tools to create and manage
+values of tuning parameters.
+
+- [`tune`](https://tune.tidymodels.org) contains the functions to
+optimize model hyper-parameters.
+
+- [`workflows`](https://workflows.tidymodels.org) has methods to combine
+pre-processing steps and models into a single object.
+
+- [`yardstick`](https://yardstick.tidymodels.org) contains tools for
+evaluating models (e.g. accuracy, RMSE, etc.).
+
+
+
+-----
+
+In this lab, we'll work on the same credit scoring data from last week. To recall, the credit scoring data has the following columns:
+
+- `Status`: credit status (**the target variable**)
+- `Seniority`: job seniority in years
+- `Home`: type of home ownership
+- `Time`: time of requested loan
+- `Age`: client's age 
+- `Marital`: marital status 
+- `Records`: existance of records
+- `Job`: type of job
+- `Expenses`: amount of expenses
+- `Income`: amount of income
+- `Assets`: amount of assets
+- `Debt`: amount of debt
+- `Amount`: amount requested of loan
+- `Price`: price of good
+
+
+## Part 1 - recapping from last week: data loading and preprocessing recipe
+
+Let's start by loading and splitting the data. From last week's exploration, we already knew that there are ~4500 observations and that the class attribute is a bit imbalanced, with a 28:72 bad-to-good ratio, no missing values on the target variable, a few scattered missing values and no grouping structure. We'll replicate the splitting that we used last week, _stratifying_ the splits by the target variable to ensure that the same class balance is retained across both the _model development_ and the _test_ sets.
+
+```{r}
+## Load data
+X <- modeldata::credit_data
+
+set.seed(20251119) # Same seed as last week, to re-generate the same splits
+
+# Generate random splits with stratification on the target variable
+mysplits <- initial_split(X, prop = .8, strata = "Status")
+# NOTE: if we had a grouping variable, we would use "group_initial_split(X, ..., group = "grouping_variable)" instead. 
+
+# Attribute the splits generated by initial_splits() to specific variables that we can operate on
+Xmod     <- training(mysplits)
+Xtest    <- testing(mysplits)
+rm(X)
+```
+
+From last week's EDA, we also know that there were a few data issues that required the following preprocessing steps:
+
+- Mode imputation for variables `Home`, `Job`, `Marital` and `Records`
+- Variable `Home`: combine level "ignore" into "other"
+- Variable `Marital`: combine "divorced" with "separated".
+- Variables `Age`, `Amount`, `Income`, `Price`, `Expenses`, `Seniority` and `Time`: Imputation by winsorised mean.
+- Variables `Age`, `Amount`, `Income`, `Price`, `Expenses` and `Seniority`: log transformation (using `log1p()` to deal with zeros).
+- Variables `Age`, `Amount`, `Income` and `Price`: winsorisation
+- Variables `Age`, `Amount`, `Income`, `Price`, `Expenses`, `Seniority` and `Time`: scaling by normalisation
+- Variables `Debt` and `Asset`: kNN-based imputation followed by ordinal encoding
+- Dimensionality reduction using PCA (for numerical predictors)
+- one-hot encoding (for categorical predictors)
+
+```{r}
+# Build preprocessing recipe:
+dpp.stack <- recipe(Status ~ ., data = Xmod) %>%
+  # mode imputation
+  step_impute_mode(all_factor_predictors()) %>%
+  # collapse factor levels using fct_collapse() from package `forcats`
+  step_mutate(Home = fct_collapse(Home, other = c("other", "ignore"))) %>%
+  step_mutate(Marital = fct_collapse(Marital, Unmarried = c("divorced", "separated"))) %>%
+  # Imputation by winsorised mean
+  step_impute_mean(all_numeric_predictors(), -Debt, -Assets, trim = 0.1) %>%
+  # Log transformation
+  step_mutate_at(all_numeric_predictors(), -Debt, -Assets, -Time, fn = ~log1p(.x)) %>%
+  # Winsorisation at 5% (less extreme than the one used in the mean imputation)
+  step_hai_winsorized_truncate(Age, Amount, Income, Price, fraction = .05) %>%
+  # Remove pre-winsorisation versions of affected variables
+  step_rm(Age, Amount, Income, Price) %>%
+  # Normalisation scaling
+  step_normalize(all_numeric_predictors(), -Debt, -Assets) %>%
+  # kNN imputation
+  step_impute_knn(Debt, Assets) %>%
+  # Ordinal encoding
+  step_cut(Debt, breaks = c(0.001, 500, 1000, 5000), 
+           include_outside_range = TRUE) %>%
+  step_cut(Assets, breaks = c(0.001, 1000, 10000, 100000), 
+           include_outside_range = TRUE) %>%
+  # PCA on the numeric predictors, retaining at least 90% 
+  # of the total variability of the original features 
+  step_pca(all_numeric_predictors(), threshold = 0.9) %>%
+  # Ensure that nominal predictors don't break if unseen levels appear in test/new data.
+  step_novel(all_factor_predictors()) %>%
+  # One-hot encoding of factor variables
+  step_dummy(all_factor_predictors())
+```
+
+## Part II - defining a baseline model
+
+Let's start by defining a basic predictive model, and evaluating it using cross validation. In this week's lecture we used the linear model _logistic regression_ as an example, so let's try a different one here: a _decision tree_
+
+```{r}
+dt.model <- decision_tree() %>%
+  set_mode(mode = "classification") %>% # To make sure we're building a classification model
+  set_engine(engine = "rpart")          # The underlying model engine. Check model documentation for details.
+```
+
+If you look at the documentation of the documentation of `decision_tree()`, you'll notice that this model has two hyperparameters that we could have set: `tree_depth` and `min_n`. By default, these hyperparameters receive standard values without user input, but we could have passed explicit values, or left them as tunable parameters (using `tune()`) if we wished
+
+Once we have a model definition, we can put the preprocessing and model parts together into a _workflow_, which is a unified _learnable object_:
+
+```{r}
+first_wf <- workflow() %>%
+  add_recipe(dpp.stack) %>%
+  add_model(dt.model)
+
+first_wf
+```
+
+As meantioned above, this workflow represents a consolidated object that can be _learned_ from the training data and later _assessed_ or _deployed_. Putting all learnable elements of a predictive pipeline into this sort of standardised object is considered good practice, as it makes it easier not to inadvertently apply some transformation on the model development data that is later forgotten when deploying the model.
+
+We can easily fit and assess this first workflow using cross-validation. For that, we need to define the cross-validation folds, then use them to perform multiple fit/eval cycles, and finally extract the consolidated (average) performance. We'll use a basic 5-fold cross validation.
+
+( _Important: any specific data aspects that were considered important in the original train/test splitting - such as stratification or grouping - needs to also be considered for any other later splitting, including cross-validation._ )
+
+```{r}
+set.seed(20191126)
+
+# Define cross-validation folds
+folds <- vfold_cv(Xmod, v = 5, strata = "Status")
+
+# Fit the model using the cross-validation splits
+first_wf_fit <- first_wf %>% 
+  fit_resamples(folds, metrics = metric_set(accuracy, roc_auc, ppv, npv, f_meas))
+```
+
+This routine already fits and assesses the model multiple times, using the cross-validation folds, and collects the named performance metrics for each case. We can query the performance values using:
+
+```{r}
+collect_metrics(first_wf_fit)
+```
+
+We can think about these values as our baseline performance estimates: we obtained those using a reasonably simple model (albeit with an already complex preprocessing stack) and without any tuning. PPV and NPV provide a neat breakdown of the reliability of model predictions for the positive and negative cases, respectively ( _note: by default, the "positive" class corresponds to the first (alphabetically) class label of the target variable_ ).
+
+There are different things we could do now: we could try using more complex model, such as a random forest (using `rand_forest()`) or a neural network (using `mlp()`); or try to perform some hyperparameter tuning on the basic model to see if we can improve its performance. 
+
+We'll leave the exploration of more complex models as something you can try later, and focus on hyperparameter tuning. Let's assume that we only want to optimise the two hyperparameters of the decision tree. We can set this experiment up as follows:
+
+
+```{r}
+# redefine the model with tunable parameters:
+dt.model2 <- decision_tree(tree_depth = tune(), min_n = tune()) %>%
+  set_mode(mode = "classification") %>% 
+  set_engine(engine = "rpart")
+
+wf_second <- workflow() %>%
+  add_recipe(dpp.stack) %>%
+  add_model(dt.model2)
+
+wf_second
+
+```
+
+```{r}
+set.seed(20251126)
+
+# Set up a 5 x 5 grid 
+dt.grid <- grid_regular(min_n(),
+                        tree_depth(),
+                        levels = 5)
+
+# Since tuning will require 125 instances of model fitting and assessment, 
+# let's reduce the number of CV folds to 3 to make it less time-consuming
+tune.folds <- vfold_cv(Xmod, v = 3, strata = "Status")
+```
+
+Finally, let's run the tuning (note: this may take some time):
+
+```{r}
+set.seed(20251126)
+dt.tuned <- wf_second %>% 
+  tune_grid(resamples = tune.folds,
+            grid = dt.grid,
+            metrics = metric_set(roc_auc, ppv, npv, accuracy),
+            control = control_grid(verbose = FALSE)) # Set to TRUE of you want to look at it while it runs
+
+dt.tuned
+```
+
+
+Once the tuning is finished, we can both explore them and select the best result. `collect_metrics()` returns a data frame with all the results (one row per <configuration, metric> pair), which is useful if you want to investigate the effects of some hyperparameters on the performance of the workflow:
+
+```{r}
+collect_metrics(dt.tuned)
+```
+
+You can use these results to plot how the performance of your models varies as a function of hyperparameter values, or perform other visualisation / exploration tasks if needed; but, to check the best configuration found, you can just do:
+
+```{r}
+# visualise the 10 best configurations according to AUC
+dt.tuned %>%
+  show_best(metric = "roc_auc", n = 10)
+```
+
+
+Notice something interesting: there were 5 configurations tied as the best one(s) according to AUC, all of which had the same value of `tree_depth= 4` but different `min_n`. The "second places" are all configurations that have `min_n = 40`, but different `tree_depth`. This indicates that, at least in some regions of the hyperparameter space, decision tree performance for this problem is strongly guided individually by one of the parameters at a time.
+
+We can select and check the best configurations using:
+
+```{r}
+best.conf <- dt.tuned %>%
+  select_best(metric = "roc_auc")
+
+best.conf
+
+# Redefine the workflow using the optimised hyperparameters:
+final_wf <- 
+  wf_second %>% 
+  finalize_workflow(best.conf)
+
+final_wf
+```
+
+This finishes the tuning part, but you still need to re-fit the fully defined workflow before you could use it. 
+At this point, if you were still planning on changing some aspects of the preprocessing or modelling, you would keep working on it (probably defining a separate workflow object so that you could easily access the earlier versions). Once all exploration, testing etc. is finished, you would fit your final workflow (with whichever combination or preprocessing and modelling you found to return the best results) on the full _model development_ data, and then assess it one final time using the final test set:
+
+```{r}
+# You can collect as many metrics as you'd like. 
+# notice that last_fit() takes in the initial splits object, fits the workflow on the 
+# "model development" set and assesses it on the "test set"
+wf_final_fit <- 
+  final_wf %>%
+  last_fit(mysplits, metrics = metric_set(accuracy, bal_accuracy, roc_auc, ppv, npv, f_meas, sens, spec, mcc))
+
+wf_final_fit %>%
+  collect_metrics()
+```
+
+```{r}
+# To plot the estimated ROC curve for the final model
+wf_final_fit %>%
+  collect_predictions() %>% 
+  roc_curve(Status, .pred_bad) %>%
+  autoplot()
+```
+
+The final workflow object contains your finalised, fitted workflow that can be used for predicting on new data. If needed, you can investigate this model using some functions available under _tidymodels_:
+
+```{r}
+# check object final_tree for details on the decision tree nodes
+final_tree <- extract_workflow(wf_final_fit)
+
+# or, to plot the tree (if needed - not something you usually do with large decision trees)
+# final_tree %>%
+#   extract_fit_engine() %>%
+#   plot()
+# final_tree %>%
+#   extract_fit_engine() %>%
+#   text(cex = .5)
+```
+
+This predictive workflow is now ready to use! If you had new data (containing the same structure of predictors, but not the label) you could use it simply as:
+
+```{r}
+# Just to simulate data without labels:
+Xtmp <- Xtest %>% select(-Status)
+
+model_for_deployment <- wf_final_fit %>%
+  extract_workflow()
+
+my_predictions <- predict(model_for_deployment, new_data = Xtmp)
+
+my_predictions
+
+# If you wanted to predict probabilities instead, you could do:
+# my_predictions <- predict(model_for_deployment, new_data = Xtmp, type = "prob")
+
+```
+
+-----
+## TO DO
+
+Now it's your turn. After following the example above and experimenting with it in your own R session, try building and tuning a workflow for your own solution to Task II of the final coursework. Use the ideas above, read the `tidymodels` [tutorials and case studies](https://www.tidymodels.org/learn/), and good luck!
+
+```{r}
+df <- readRDS("df.rds")
+
+# Ensure outcome is factor
+df <- df %>%
+  mutate(Class = as.factor(Class))
+
+# ===============================================
+# 1. Train/test split WITH GROUPING
+# ===============================================
+
+set.seed(20251119)
+
+mysplits <- group_initial_split(
+  df,
+  prop  = 0.8,
+  group = Info_group   # << IMPORTANT
+)
+
+df_train <- training(mysplits)
+df_test  <- testing(mysplits)
+
+df_train %>% count(Class) %>% mutate(prop = n/sum(n))
+df_test  %>% count(Class) %>% mutate(prop = n/sum(n))
+
+# ===============================================
+# 2. Preprocessing recipe
+# ===============================================
+
+X_recipe <- recipe(Class ~ ., data = df_train) %>%
+  step_impute_mode(all_factor_predictors()) %>%
+  step_impute_mean(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors()) %>%
+  step_pca(all_numeric_predictors())
+
+# ===============================================
+# 3. Baseline decision tree workflow
+# ===============================================
+
+dt_baseline <- decision_tree() %>%
+  set_mode("classification") %>%
+  set_engine("rpart")
+
+wf_baseline <- workflow() %>%
+  add_recipe(X_recipe) %>%
+  add_model(dt_baseline)
+
+# ===============================================
+# 4. CROSS-VALIDATION with GROUPING
+# ===============================================
+
+set.seed(20251126)
+
+folds <- group_vfold_cv(
+  df_train,
+  v     = 5,
+  group = Info_group
+)
+
+metrics_to_use <- metric_set(
+  accuracy,
+  bal_accuracy,
+  roc_auc,
+  ppv,
+  npv,
+  f_meas
+)
+
+dt_baseline_fit <- wf_baseline %>%
+  fit_resamples(
+    resamples = folds,
+    metrics   = metrics_to_use
+  )
+
+collect_metrics(dt_baseline_fit)
+
+# ===============================================
+# 5. Hyperparameter tuning
+# ===============================================
+
+dt_tuned_model <- decision_tree(
+  tree_depth = tune(),
+  min_n      = tune()
+) %>%
+  set_mode("classification") %>%
+  set_engine("rpart")
+
+wf_tuned <- workflow() %>%
+  add_recipe(X_recipe) %>%
+  add_model(dt_tuned_model)
+
+# Tuning folds (grouped)
+set.seed(20251126)
+tune_folds <- group_vfold_cv(
+  df_train,
+  v     = 3,
+  group = Info_group
+)
+
+dt_grid <- grid_regular(
+  min_n(),
+  tree_depth(),
+  levels = 5
+)
+
+set.seed(20251126)
+dt_tuned <- wf_tuned %>%
+  tune_grid(
+    resamples = tune_folds,
+    grid      = dt_grid,
+    metrics   = metric_set(roc_auc, accuracy, ppv, npv),
+    control   = control_grid(verbose = FALSE)
+  )
+
+collect_metrics(dt_tuned)
+dt_tuned %>%
+  show_best(metric = "roc_auc", n = 10)
+
+
+best_conf <- dt_tuned %>%
+  select_best(metric = "roc_auc")
+
+
+final_wf <- wf_tuned %>%
+  finalize_workflow(best_conf)
+
+# ===============================================
+# 6. FINAL evaluation on the held-out test set
+# ===============================================
+
+final_fit <- final_wf %>%
+  last_fit(
+    split   = mysplits,
+    metrics = metric_set(
+      accuracy,
+      bal_accuracy,
+      roc_auc,
+      ppv,
+      npv,
+      f_meas,
+      sens,
+      spec,
+      mcc
+    )
+  )
+
+final_fit %>% collect_metrics()
+
+# ===============================================
+# 7. ROC curve
+# ===============================================
+
+final_preds <- final_fit %>% collect_predictions()
+positive_class <- levels(final_preds$Class)[1]
+prob_col <- paste0(".pred_", positive_class)
+
+final_preds %>%
+  roc_curve(Class, !!rlang::sym(prob_col)) %>%
+  autoplot()
+
+# ===============================================
+# 8. Predict on new data
+# ===============================================
+
+df_new <- df_test %>% select(-Class)
+
+model_for_deployment <- final_fit %>%
+  extract_workflow()
+
+pred_classes <- predict(model_for_deployment, new_data = df_new)
+pred_probs   <- predict(model_for_deployment, new_data = df_new, type = "prob")
+
+head(pred_classes)
+head(pred_probs)
+
+
+```
+
